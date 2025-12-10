@@ -1,0 +1,1770 @@
+---
+title: "Steelhead_Script_Main"
+output: html_document
+date: "2024-11-18"
+---
+TITLE: Quanitifying catch inequality in recreational fisheries: a case study with California steelhead (Oncorhynchus mykiss).
+AUTHORS: Sophia R. Sanchez, Charlie Schneider, Nann. A. Fangue, Andrew L. Rypel
+CORRESPONDING AUTHOR/CODE: Sophia R. Sanchez, sosanc@ucdavis.edu
+
+DATASETS:
+
+SRRC_Dataset.csv is an aggregated dataset comprising California Department of Fish and Wildlife (CDFW) Steelhead Report and Restoration Card (SRRC) angler data from the following years: 2012 - 2022. Report cards failing to report critical data (e.g. any fish count, location code) are removed. The dataset has been summarized such that anglers are represented once per location code, per year; that is, fish counts and hours fished are summed. Columns detailing demographic data (e.g. "Date of Birth" and "Physical Zip Code") and repetitive information (e.g. "Complete Data?") removed for clarity. All other columns included. For full dataset inquires, contact the CDFW SRRC Program staff: SHcard@wildlife.ca.gov
+
+breakpoints2000.csv is the output of the computationally-demanding power analysis for loop. Power analysis process: for each basin-year combination, all cards are subset into groups of 25; cumulative Gini calculated for each bin; estimated breakpoint (sample size where Gini plateaus) for simulation output. Loop excludes NAs (which occurs when there are too few cards to produce a breakpoint in that iteration) to avoid termination. Not all locations will have the same number of iterations, hence running 2000 simulations to ensure each basin-year combination has successful 500 iterations to randomly select. breakpoints2000_Hatchery_ALL.csv and breakpoints2000_Wild_ALL.csv are the analogous outputs for only hatchery catch and wild catch, respectively. 
+
+USGS_Flow_Data.csv is an aggregated annual flow (cfs) data set via the lowermost United States Geological Survey flow gauge for 11 basins across California across the study period (2012-2022). Basins and associated gauge ID provided in Supplemental Table S1. USGS_Flow_Monthly.csv is an analogous dataset, on a monthly scale instead of annual averages.
+
+
+# PACKAGES & DATA
+## -- Packages
+```{r, echo=FALSE}
+library(readr) # Reading in CSVs
+library(here) # Reading in CSVs
+library(tidyverse)
+library(dplyr)
+library(stringr) 
+library(ggplot2)
+library(DescTools) # Gini and Lorenz curves
+library(ineq) # LAC
+library(FSA) # Dunn test
+library(rcompanion) # Dunn test cont. 
+library(segmented) # Segmented regression 
+library(lme4) # Mixed effect regression
+library(lmerTest) # Mixed effect regression
+library(Matrix) # Mixed effect regression 
+library(MuMIn) # Psuedo R^2 (LMM)
+library(mapdata) # Map
+library(maps) # Map
+library(patchwork) # Map
+library(agricolae) # Tukey test
+library(ggnewscale) # Adding multiple scale bars
+library(ggpubr) # QQ plots
+library(rstatix) ## shapiro test
+library(performance) ## mixed effect model selection
+library(datawizard) # mixed effects model standardization
+```
+
+## -- Raw Data
+Note: This chunk requires raw data from SRRC as delivered by CDFW, and cannot be run with provided data sets in repository. It is included to demonstrate the filtration process necessary to produce the cleaned subsequent data set available to users.
+
+```{r}
+# ## Importing CSVs
+# first_year = 2012; ## Setting the first year
+# last_year = 2022; ## Setting the last year
+# 
+# add_WildKept <- function(x){
+#   x <- mutate(x, WildKept = replicate(nrow(x), 0))
+#   return(x)
+# }
+# 
+# ## Creating meta list of each of the selected years. Each entry is data from a given year.
+# meta=list()
+# for(i in first_year:last_year){
+#   name <- paste("SRRC_", i,sep='')
+#   index <- i-(first_year-1)
+#   meta[[index]]=read_csv(here(paste('data/SRRC_',i,'.csv',sep='')))
+#   ## Adding "WildKept" column (populated with zeros) to years lacking it
+#   meta[[index]] <- add_WildKept(meta[[index]])
+#   assign(name, meta[[index]])
+# }
+# 
+# ## Master DF --> no manipulation
+# SRRC_raw <- do.call(rbind, meta)
+# 
+# ## Adding Basin Names
+# names <- data.frame(
+#   LocCode = 1:20,
+#   LocName = c("Smith R.", "Klamath R.", "Trinity R.", "Coastal St./R. north of Klamath R.", "Mad R.", "Eel R.", "Gualala R.", "Coastal R.\n (Kla.to Rus.)", "Russian R.", "San Lorenzo R.", "Coastal St./R. between Russian and Pajaro R.", "Carmel R.", "Coastal St./R. from Pajaro (included) to Santa Maria R.", "Santa Maria R. to Mexican Border", "Sacramento R.", "Feather R.", "Yuba R.", "American R.", "Mokelumne R.", "San Joaquin R." ))
+# 
+# ## Clean data
+# SRRC_raw_clean <- SRRC_raw %>%
+#   drop_na(WildReleased, WildKept, HatcheryReleased, HatcheryKept, LocCode) %>% ##drop NA fish counts
+#   filter(LocCode <= 20) %>%  #filter for valid LocCodes
+#   dplyr::select(-`Complete Data`, -`Date Of Birth`, -`Physical Zip Code`) %>% ##remove unnec. columns
+#   left_join(names, by = "LocCode") %>% ## adding LocNames
+#   mutate(Season = case_when( ## Season classification
+#     Month %in% c(1, 2, 3) ~ "Winter",
+#     Month %in% c(4, 5, 6, 7, 8) ~ "Spring/Summer",
+#     Month %in% c(9, 10, 11, 12) ~ "Fall"))
+# 
+# 
+# ## Summarize by angler, all (one entry per angler, per location, per year)
+# SRRC_all <- SRRC_raw_clean %>%
+#   group_by(Year, LocName, LocCode, `Angler ID`) %>%
+#   summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+# 
+# #write_csv(SRRC_all, "SRRC_Dataset.csv")
+# 
+# 
+# #########################################################################
+# 
+# 
+# ## Seasonal Analogs:
+# 
+# #SRRC_Winter <- SRRC_raw_clean %>%
+# #  filter(Season == "Winter") %>%
+# #  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+# #  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+# 
+# #SRRC_Fall <- SRRC_raw_clean %>%
+# #  filter(Season == "Fall") %>%
+# #  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+# #  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+# 
+# #SRRC_SpringSummer <- SRRC_raw_clean %>%
+# #  filter(Season == "Spring/Summer") %>%
+# #  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+# #  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+```
+
+## -- Data Frames
+Note: Users from repository start here. 
+```{r, echo=FALSE}
+
+SRRC_all <- read_csv(here("data/SRRC_Dataset.csv"))
+
+SRRC_all <- SRRC_all %>% 
+  mutate(Region = case_when ( ## Region classification
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley")) %>% 
+  mutate(Hatchery = case_when ( ## Hatchery basin classification
+      LocCode %in% c(2,3,5,9,15,16,18,19) ~ "Yes",
+      LocCode %in% c(1,4,6,7,8,10,11,12,13,14,17,20) ~ "No")) %>%  
+   mutate(
+     T_sum = WildKept + WildReleased + HatcheryKept + HatcheryReleased, ## Sum total catch
+     W_sum = WildKept + WildReleased, ## Sum wild catch
+     H_sum = HatcheryKept + HatcheryReleased, ## Sum hatchery catch
+     CPUE = T_sum / HoursFished, ## Total catch CPUE
+     CPUE_W = W_sum / HoursFished, ## Wild catch CPUE
+     CPUE_H = H_sum / HoursFished, ## Hatchery catch CPUE
+     W_Present = W_sum != 0, ## Presence/absence wild catch 
+     H_Present = H_sum != 0 ) %>% ## Presence/absence hatchery catch
+  dplyr::select("Year", "LocCode", "LocName", "Region", "Hatchery", "Angler ID", "T_sum", "W_sum", "H_sum", "HoursFished", "CPUE", "CPUE_W", "CPUE_H", "WildKept", "WildReleased", "HatcheryKept", "HatcheryReleased", "W_Present", "H_Present") ## Organize
+
+
+###################### ADDITIONAL DATA FRAMES ################################
+
+
+## Card count totals by basin dataframe
+CardCounts_ALL <- SRRC_all %>%
+  mutate(CardCount_Wild = ifelse(W_Present, 1, 0), 
+         CardCount_Hatchery = ifelse(H_Present, 1, 0)) %>% 
+  group_by(Year, LocCode, LocName) %>%
+  summarise(row_count = n(), 
+            CardCount_Wild = sum(CardCount_Wild), ## Total number cards reporting wild fish catch 
+            CardCount_Hatchery = sum(CardCount_Hatchery)) %>% ## Total number cards reporting hatchery fish catch
+  rename(CardCount = row_count) %>% ## Total number cards
+  ungroup() %>%
+  mutate(LocYR = paste("L", LocCode,"_", Year, sep = "")) %>% 
+  arrange(LocCode)
+
+## Average CPUE by basin dataframe
+CPUE_df <- SRRC_all %>%
+  group_by(Year, LocName, Region, Hatchery) %>%
+  drop_na(CPUE) %>% 
+  filter(!is.infinite(CPUE)) %>% 
+  summarize(mean_CPUE = mean(CPUE)) %>%
+  mutate(Year = as.numeric(Year)) %>% 
+  ungroup()
+
+## Wild catch only dataframes 
+SRRC_Wild_ALL <- SRRC_all %>% 
+  filter(W_Present == 'TRUE')
+
+CardCounts_Wild_ALL <- SRRC_Wild_ALL %>%
+  group_by(Year, LocCode, LocName) %>%
+  summarise(row_count = n()) %>% 
+  rename(CardCount = row_count) %>%
+  ungroup() %>%
+  mutate(LocYR = paste("L", LocCode,"_", Year, sep = "")) %>% 
+  arrange(LocCode)
+
+## Hatchery catch only dataframes 
+SRRC_Hatchery_ALL <- SRRC_all %>% 
+  filter(H_Present == 'TRUE')
+
+CardCounts_Hatchery_ALL <- SRRC_Hatchery_ALL %>%
+  group_by(Year, LocCode, LocName) %>%
+  summarise(row_count = n()) %>% 
+  rename(CardCount = row_count) %>%
+  ungroup() %>%
+  mutate(LocYR = paste("L", LocCode,"_", Year, sep = "")) %>% 
+  arrange(LocCode)
+
+```
+
+
+# POWER ANALYSIS
+
+!WARNING: Only run commented-out breakpoint script on computationally-capable computer; can require upwards of 24hr+ to run. CSV of for loop output provided for convenience. 
+
+## -- Total Catch
+```{r}
+
+################## FUNCTIONS #########################
+
+## Count Cards
+count_length <- function(df) {
+  length_df <- nrow(df) ## Count number of rows (entries) in df 
+  return(length_df)
+}
+
+## Calculate Gini
+calculate_gini <- function(df) {
+  values <- unlist(df) ## Transforms tibble t_freq into a vector
+  gini_coefficient <- DescTools::Gini(df$T_sum, df$n) ## Plug in (DESCTOOLS!) gini function
+  return(gini_coefficient)
+}
+
+## Misc. lists
+group_list <- function(lst) {
+  df <- as_tibble(lst) 
+  grouped_df <- df %>% group_by(T_sum) ## Create groups based on T_sum value
+  return(grouped_df)
+}
+
+tally_list <- function(lst) {
+  df <- as_tibble(lst) 
+  tally_result <- df %>% count(T_sum) ## Returns df with T_sum and freq of T_sum values (n)
+  return(tally_result)
+}
+
+## Calculate cumulative Gini breakpoints
+get_gini_breakpoints <- function(x,y){
+  inc_list <- list()
+  split_list <- list()
+  n <- nrow(x)
+  k <- floor(nrow(x)/y)
+  randomized <- x[sample(1:n,n,replace = FALSE),]
+  even_groups <- split(1:n, cut(1:n,k))
+  split_list <- lapply(even_groups, function(g){
+    randomized[g,]
+  })
+  psi <- 10
+  for (i in 1:length(split_list)) {
+    if (i==1)
+      inc_list[[i]] = split_list[[1]]
+    else
+      inc_list[[i]] = rbind(inc_list[[i-1]],split_list[[i]])
+  }
+  
+  t_freq <- lapply(inc_list, group_list) %>%
+    lapply(tally_list)
+
+  inc_list_length <- as.numeric(sapply(inc_list, count_length, simplify = TRUE))
+  gini_results <- as.numeric(sapply(t_freq, calculate_gini, simplify = TRUE))
+  data <- as.data.frame(cbind(gini_results,inc_list_length))
+ 
+  
+broken_stick_model <- segmented(lm(gini_results ~ inc_list_length, data = data), seg.Z = ~ inc_list_length, control = seg.control(quant = TRUE)) ## Broken stick model 
+breakpoints <- as.data.frame(broken_stick_model$psi)
+estimated_breakpoint <- breakpoints$Est.
+  
+  results <- as.vector(c(estimated_breakpoint,x$Year[1],x$LocCode[1],y))
+  return(results)
+}
+
+
+############# BREAK POINT FOR LOOP #######################################
+
+
+# subset_list <- list()
+# for(i in first_year:last_year){
+#   index <- i-(first_year-1)
+#   subset_list[[index]] <- list()
+#   tmp <- list()
+#   for(j in 1:20){
+#   name <- paste('subset_L', j,'_',i,sep='')
+#   tmp[[j]] <- SRRC_all %>%
+#   filter(Year == i, LocCode == j) %>%
+#   dplyr::select(-W_sum, -H_sum, -HoursFished, -CPUE, -WildKept, -WildReleased, -HatcheryKept, -HatcheryReleased)
+#   }
+#   subset_list[[i-(first_year-1)]] <- tmp
+#   names(subset_list)[i-(first_year-1)] <- paste(i)
+# }
+# 
+# iterations <- 2000
+# card_count <- c(100)
+# 
+# results_df_ALL <- data.frame()
+# 
+# for(k in 1:length(card_count)){
+#   minimum <- as.numeric(card_count[k])
+#   min <- minimum/4
+#   for(i in first_year:last_year){
+#     subset_list[[i-(first_year-1)]] <- subset_list[[i-(first_year-1)]][as.numeric(sapply(subset_list[[i-(first_year-1)]], nrow)) > minimum]
+#     for(j in 1: length(subset_list[[i-(first_year-1)]])){
+#       sum <- 0
+#       temp <- vector()
+#       for(z in 1:iterations){
+#         temp <- tryCatch({
+#           get_gini_breakpoints(subset_list[[i-(first_year-1)]][[j]],min)
+#         }, error = function(e){
+#           NA
+#         })
+# 
+#         if(!anyNA(temp)){
+#         print(temp)
+#         results_df_ALL <- rbind(results_df_ALL,temp)
+#       }
+#       }
+#     }
+#   }
+# }
+# 
+# colnames(results_df_ALL) <- c("Est_Breakpoint","Year","Location","Group_Size")
+# x2000 <- results_df_ALL %>%
+#   group_by(Year, Location) %>%
+#   tally() %>%
+#   ungroup()
+# 
+# write_csv(results_df_ALL, "breakpoints2000.csv")
+
+
+## FILTER DATA
+## Read in CSV. Combine all breakpoints to calculate data-wide breakpoint. Filter out LocYrs not meeting this criteria. Calculate breakpoints by LocYr. Filter again, remove Loc with incomplete yrs. This is the final dataset to use going forward.  
+
+breakpoints2000_ALL <- read_csv(here("data/breakpoints2000.csv"))
+
+## Count how many iterations each location ran
+breakpoints2000_tally_ALL<- breakpoints2000_ALL %>% 
+  group_by(Year, Location) %>% 
+  tally() %>% 
+  ungroup
+  
+## Randomly select 500 of the iterations for each location 
+set.seed(123)
+breakpoints2000_ALL_sampled <- breakpoints2000_ALL %>%
+  group_by(Location) %>%
+  sample_n(500, replace = FALSE) %>%
+  ungroup()
+
+
+## DATA-WIDE BREAKPOINT 
+statewide_breakpoints_ALL <- breakpoints2000_ALL_sampled %>%
+  summarize(
+    Mean = mean(Est_Breakpoint),
+    Q1 = quantile(Est_Breakpoint, probs = 0.25),
+    Median = median(Est_Breakpoint),
+    Q3 = quantile(Est_Breakpoint, probs = 0.75)
+  ) %>% 
+  ungroup()
+statewide_breakpoints_ALL
+
+statewide_bp_ALL <- statewide_breakpoints_ALL$Q1
+
+
+## LOC-SPECIFIC BREAKPOINT 
+location_breakpoints_ALL <- breakpoints2000_ALL_sampled %>%
+  group_by(Location) %>%
+  summarize(
+    Mean = mean(Est_Breakpoint),
+    Q1 = quantile(Est_Breakpoint, probs = 0.25),
+    Median = median(Est_Breakpoint),
+    Q3 = quantile(Est_Breakpoint, probs = 0.75)
+  ) %>% 
+   ungroup() %>% 
+  add_row(., Location = 4, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>% ## manually add years with failed BPs
+  add_row(.,Location = 12, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 14, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  rename(LocCode = Location) %>% 
+  arrange(LocCode)
+location_breakpoints_ALL
+
+## Filter LocCodes not meeting statewide and location-specific breakpoints:
+
+## Breakpoint function
+Breakpoint_filter_ALL <- function(x, y) {
+  result_bp <- CardCounts_ALL %>% 
+    filter(CardCount > statewide_bp_ALL) %>% ## Filter statewide breakpoint
+    filter(LocCode == x) %>% ## Filter location-sp breakpoints
+    filter(CardCount > y) %>% 
+    tally() %>% 
+    rename(Num_Approved_Yrs = n) %>% 
+    mutate(Location = x)
+  return(result_bp)
+}
+
+## Forloop to count years meeting requirements 
+temp_BP_list_ALL <- list()
+for (i in 1:20) {
+  x <- i
+  y <- location_breakpoints_ALL$Q1[i]
+  temp_results <- Breakpoint_filter_ALL(x, y)
+  temp_BP_list_ALL[[i]] <- temp_results
+}
+
+temp_BP_ALL <- bind_rows(temp_BP_list_ALL)
+
+BP_approved_ALL <- temp_BP_ALL %>%
+  rename(LocCode = Location) %>% 
+  filter(Num_Approved_Yrs == 11) 
+
+SRRC_filtered_ALL <- SRRC_all %>%
+  inner_join(BP_approved_ALL, by = "LocCode")
+
+## Bonferroni correction 
+Bonferroni_ALL <- 0.05/13
+
+## Orders for later plots
+Loc_Order_longitude <- c( "Smith R.", "Klamath R.", "Trinity R.", "Mad R.", "Eel R.", "Coastal R.\n (Kla.to Rus.)", "Russian R.", "Sacramento R.", "Feather R.", "Yuba R.", "American R.", "Mokelumne R.", "San Lorenzo R." ) ## By latitude
+
+Loc_Order_Gini <- c("Russian R.","Mad R.","Smith R.","Coastal R.\n (Kla.to Rus.)","Eel R.","Klamath R.", "Trinity R.","American R.","Yuba R.","Sacramento R.","Mokelumne R.","Feather R.","San Lorenzo R.") ## By Region/Gini
+
+Loc_Order_Statewide <- c("Russian R.","Mad R.","Smith R.","Coastal R.\n (Kla.to Rus.)","Eel R.","Klamath R.", "Trinity R.","American R.","Yuba R.","Sacramento R.","Mokelumne R.","Feather R.","San Lorenzo R.", "Statewide Avg.") ## By Region/Gini, ending with Statewide Average
+
+```
+
+## -- Catch by Origin
+Running same power analysis process as above to determine eligibility of subsequent analysis on a hatchery-vs-wild catch scale as well. Requires running of functions in R code chunk above. 
+
+!WARNING: Only run commented-out breakpoint script on computationally-capable computer; can require upwards of 24hr+ to run. CSV of for loop output provided for convenience. 
+```{r}
+
+################### Hatchery-origin fish ################################
+
+# subset_list <- list()
+# for(i in first_year:last_year){
+#   index <- i-(first_year-1)
+#   subset_list[[index]] <- list()
+#   tmp <- list()
+#   for(j in 1:20){
+#   name <- paste('subset_L', j,'_',i,sep='')
+#   tmp[[j]] <- SRRC_Hatchery_ALL %>%
+#   filter(Year == i, LocCode == j) %>%
+#   dplyr::select(-W_sum, -H_sum, -HoursFished, -CPUE, -WildKept, -WildReleased, -HatcheryKept, -HatcheryReleased)
+#   }
+#   subset_list[[i-(first_year-1)]] <- tmp
+#   names(subset_list)[i-(first_year-1)] <- paste(i)
+# }
+# 
+# iterations <- 2000
+# card_count <- c(100)
+# 
+# results_df_Hatchery_ALL <- data.frame()
+# 
+# for(k in 1:length(card_count)){
+#   minimum <- as.numeric(card_count[k])
+#   min <- minimum/4
+#   for(i in first_year:last_year){
+#     subset_list[[i-(first_year-1)]] <- subset_list[[i-(first_year-1)]][as.numeric(sapply(subset_list[[i-(first_year-1)]], nrow)) > minimum]
+#     for(j in 1: length(subset_list[[i-(first_year-1)]])){
+#       sum <- 0
+#       temp <- vector()
+#       for(z in 1:iterations){
+#         temp <- tryCatch({
+#           get_gini_breakpoints(subset_list[[i-(first_year-1)]][[j]],min)
+#         }, error = function(e){
+#           NA
+#         })
+# 
+#         if(!anyNA(temp)){
+#         print(temp)
+#         results_df_Hatchery_ALL <- rbind(results_df_Hatchery_ALL,temp)
+#       }
+#       }
+#     }
+#   }
+# }
+# 
+# colnames(results_df_Hatchery_ALL) <- c("Est_Breakpoint","Year","Location","Group_Size")
+# x2000 <- results_df_Hatchery_ALL %>%
+#   group_by(Year, Location) %>%
+#   tally() %>%
+#   ungroup()
+# 
+# write_csv(results_df_Hatchery_ALL, "breakpoints2000_Hatchery_ALL.csv")
+
+
+## Filter data
+## Read in CSV. Combine all breakpoints to calculate data-wide breakpoint. Filter out LocYrs not meeting this criteria. Calculate breakpoints by LocYr. Filter again, remove Loc with incomplete yrs. This is the final dataset to use going forward.  
+
+breakpoints2000_Hatchery_ALL <- read_csv(here("data/breakpoints2000_Hatchery_ALL.csv"))
+
+## Count how many iterations each location ran
+breakpoints2000_tally_Hatchery_ALL<- breakpoints2000_Hatchery_ALL %>% 
+  group_by(Year, Location) %>% 
+  tally() %>% 
+  ungroup
+  
+## Randomly select 500 of the iterations for each location 
+set.seed(123)
+breakpoints2000_Hatchery_ALL_sampled <- breakpoints2000_Hatchery_ALL %>%
+  group_by(Location) %>%
+  sample_n(500, replace = FALSE) %>%
+  ungroup()
+
+
+## DATA-WIDE BREAKPOINT 
+statewide_breakpoints_Hatchery_ALL <- breakpoints2000_Hatchery_ALL_sampled %>%
+  summarize(
+    Mean = mean(Est_Breakpoint),
+    Q1 = quantile(Est_Breakpoint, probs = 0.25),
+    Median = median(Est_Breakpoint),
+    Q3 = quantile(Est_Breakpoint, probs = 0.75)
+  ) %>% 
+  ungroup()
+statewide_breakpoints_Hatchery_ALL
+
+statewide_bp_Hatchery_ALL <- statewide_breakpoints_Hatchery_ALL$Q1
+
+
+## LOC-SPECIFIC BREAKPOINT 
+location_breakpoints_Hatchery_ALL <- breakpoints2000_Hatchery_ALL_sampled %>%
+  group_by(Location) %>%
+  summarize(
+    Mean = mean(Est_Breakpoint),
+    Q1 = quantile(Est_Breakpoint, probs = 0.25),
+    Median = median(Est_Breakpoint),
+    Q3 = quantile(Est_Breakpoint, probs = 0.75)
+  ) %>% 
+   ungroup() %>% 
+  add_row(., Location = 4, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>% ## Manually add years with failed BPs
+  add_row(.,Location = 7, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 8, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 10, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 11, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 12, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 13, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 14, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 17, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 19, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  add_row(.,Location = 20, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  rename(LocCode = Location) %>% 
+  arrange(LocCode)
+location_breakpoints_Hatchery_ALL
+
+## Filter LocCodes not meeting statewide and location-specific breakpoints:
+
+## Breakpoint function 
+Breakpoint_filter_Hatchery_ALL <- function(x, y) {
+  result_bp_Hatchery <- CardCounts_Hatchery_ALL %>% 
+    filter(CardCount > statewide_bp_Hatchery_ALL) %>% ## Filter statewide breakpoint
+    filter(LocCode == x) %>% ## Filter location-sp breakpoints
+    filter(CardCount > y) %>% 
+    tally() %>% 
+    rename(Num_Approved_Yrs = n) %>% 
+    mutate(Location = x)
+  return(result_bp_Hatchery)
+}
+
+## Forloop to count years meeting requirements 
+temp_BP_list_Hatchery_ALL <- list()
+for (i in 1:20) {
+  x <- i
+  y <- location_breakpoints_Hatchery_ALL$Q1[i]
+  temp_results <- Breakpoint_filter_Hatchery_ALL(x, y)
+  temp_BP_list_Hatchery_ALL[[i]] <- temp_results
+}
+
+temp_BP_Hatchery_ALL <- bind_rows(temp_BP_list_Hatchery_ALL)
+
+BP_approved_Hatchery_ALL <- temp_BP_Hatchery_ALL %>%
+  rename(LocCode = Location) %>% 
+  filter(Num_Approved_Yrs == 11) 
+
+
+
+################### Wild-origin fish ################################
+
+
+
+# ```{r}
+# subset_list <- list()
+# for(i in first_year:last_year){
+#   index <- i-(first_year-1)
+#   subset_list[[index]] <- list()
+#   tmp <- list()
+#   for(j in 1:20){
+#   name <- paste('subset_L', j,'_',i,sep='')
+#   tmp[[j]] <- SRRC_Wild_ALL %>%
+#   filter(Year == i, LocCode == j) %>%
+#   dplyr::select(-W_sum, -H_sum, -HoursFished, -CPUE, -WildKept, -WildReleased, -HatcheryKept, -HatcheryReleased)
+#   }
+#   subset_list[[i-(first_year-1)]] <- tmp
+#   names(subset_list)[i-(first_year-1)] <- paste(i)
+# }
+# 
+# iterations <- 2000
+# card_count <- c(100)
+# 
+# results_df_Wild_ALL <- data.frame()
+# 
+# for(k in 1:length(card_count)){
+#   minimum <- as.numeric(card_count[k])
+#   min <- minimum/4
+#   for(i in first_year:last_year){
+#     subset_list[[i-(first_year-1)]] <- subset_list[[i-(first_year-1)]][as.numeric(sapply(subset_list[[i-(first_year-1)]], nrow)) > minimum]
+#     for(j in 1: length(subset_list[[i-(first_year-1)]])){
+#       sum <- 0
+#       temp <- vector()
+#       for(z in 1:iterations){
+#         temp <- tryCatch({
+#           get_gini_breakpoints(subset_list[[i-(first_year-1)]][[j]],min)
+#         }, error = function(e){
+#           NA
+#         })
+# 
+#         if(!anyNA(temp)){
+#         print(temp)
+#         results_df_Wild_ALL <- rbind(results_df_Wild_ALL,temp)
+#       }
+#       }
+#     }
+#   }
+# }
+# 
+# colnames(results_df_Wild_ALL) <- c("Est_Breakpoint","Year","Location","Group_Size")
+# x2000 <- results_df_Wild_ALL %>%
+#   group_by(Year, Location) %>%
+#   tally() %>%
+#   ungroup()
+# 
+# write_csv(results_df_Wild_ALL, "breakpoints2000_Wild_ALL.csv")
+
+
+## Filter data
+## Read in CSV. Combine all breakpoints to calculate data-wide breakpoint. Filter out LocYrs not meeting this criteria. Calculate breakpoints by LocYr. Filter again, remove Loc with incomplete yrs. This is the final dataset to use going forward.  
+
+breakpoints2000_Wild_ALL <- read_csv(here("data/breakpoints2000_Wild_ALL.csv"))
+
+## Count how many iterations each location ran
+breakpoints2000_tally_Wild_ALL<- breakpoints2000_Wild_ALL %>% 
+  group_by(Year, Location) %>% 
+  tally() %>% 
+  ungroup
+  
+## Randomly select 500 of the iterations for each location 
+set.seed(123)
+breakpoints2000_Wild_ALL_sampled <- breakpoints2000_Wild_ALL %>%
+  group_by(Location) %>%
+  sample_n(500, replace = FALSE) %>%
+  ungroup()
+
+
+## DATA-WIDE BREAKPOINT 
+statewide_breakpoints_Wild_ALL <- breakpoints2000_Wild_ALL_sampled %>%
+  summarize(
+    Mean = mean(Est_Breakpoint),
+    Q1 = quantile(Est_Breakpoint, probs = 0.25),
+    Median = median(Est_Breakpoint),
+    Q3 = quantile(Est_Breakpoint, probs = 0.75)
+  ) %>% 
+  ungroup()
+statewide_breakpoints_Wild_ALL
+
+statewide_bp_Wild_ALL <- statewide_breakpoints_Wild_ALL$Q1
+
+
+## LOC-SPECIFIC BREAKPOINT 
+location_breakpoints_Wild_ALL <- breakpoints2000_Wild_ALL_sampled %>%
+  group_by(Location) %>%
+  summarize(
+    Mean = mean(Est_Breakpoint),
+    Q1 = quantile(Est_Breakpoint, probs = 0.25),
+    Median = median(Est_Breakpoint),
+    Q3 = quantile(Est_Breakpoint, probs = 0.75)
+  ) %>% 
+   ungroup() %>% 
+  #add_row(., Location = 4, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>% # manually add years with failed BPs
+ # add_row(.,Location = 12, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+ # add_row(.,Location = 14, Mean = NA, Q1 = NA, Median = NA, Q3 = NA ) %>%
+  rename(LocCode = Location) %>% 
+  arrange(LocCode)
+location_breakpoints_Wild_ALL
+
+## Filter LocCodes not meeting statewide and location-specific breakpoints:
+
+## Breakpoint function 
+Breakpoint_filter_Wild_ALL <- function(x, y) {
+  result_bp_Wild <- CardCounts_Wild_ALL %>% 
+    filter(CardCount > statewide_bp_Wild_ALL) %>% ## Filter statewide breakpoint
+    filter(LocCode == x) %>% ## Filter location-sp breakpoints
+    filter(CardCount > y) %>% 
+    tally() %>% 
+    rename(Num_Approved_Yrs = n) %>% 
+    mutate(Location = x)
+  return(result_bp_Wild)
+}
+
+## Forloop to count years meeting requirements 
+temp_BP_list_Wild_ALL <- list()
+for (i in 1:20) {
+  x <- i
+  y <- location_breakpoints_Wild_ALL$Q1[i]
+  temp_results <- Breakpoint_filter_Wild_ALL(x, y)
+  temp_BP_list_Wild_ALL[[i]] <- temp_results
+}
+
+temp_BP_Wild_ALL <- bind_rows(temp_BP_list_Wild_ALL)
+
+BP_approved_Wild_ALL <- temp_BP_Wild_ALL %>%
+  rename(LocCode = Location) %>% 
+  filter(Num_Approved_Yrs == 11) 
+
+
+
+################### Eligibility for Analysis ################################
+
+
+HW_qualify_ALL <- BP_approved_Hatchery_ALL %>% 
+  inner_join(BP_approved_Wild_ALL, by = "LocCode") %>% 
+  dplyr::select(LocCode)
+
+## RESULTS: Only 3 locations qualified for analysis comparing wild vs hatchery catch. Not moving forward with this sub-analysis.  
+
+```
+
+
+# GINI, LAC, LORENZ
+
+Legend:
+- Total Gini (T_Gini) = Gini calculated for all fish 
+- Wild Gini (W_Gini) = Gini calculated for only wild-origin fish 
+- Hatchery Gini (H_Gini) = Gini calculated for only hatchery-origin fish
+- LAC = Lorenz Asymmetry Coefficient
+
+```{r T_Gini_LAC_Lorenz}
+
+################### TOTAL GINI #############################################
+
+## Creating frequency table of total fish, grouped by year & location code
+T_freq <- SRRC_filtered_ALL %>% 
+  group_by(Year, LocCode,LocName,T_sum) %>% 
+  tally() %>% 
+  ungroup() %>% 
+  rename(Frequency = n)
+
+## For loop calculating Gini & LAC for each location per year
+Unique_Years <- unique(T_freq$Year)
+Unique_LocCodes <- unique(T_freq$LocCode)
+
+T_Gini_list <- list()
+T_LAC_list <- list()
+
+for (Year in Unique_Years) {
+  for (LocCode in Unique_LocCodes) {
+    
+    T_freq_subset <- T_freq[T_freq$Year == Year & T_freq$LocCode == LocCode, ]
+    
+    Gini <- DescTools::Gini(x = T_freq_subset$T_sum, weights = T_freq_subset$Frequency, unbiased = FALSE)
+    Col_name <- paste("L", LocCode, "_", Year, sep = "")
+    T_Gini_list[[Col_name]] <- Gini
+    
+    LAC <- Lasym(T_freq_subset$T_sum, n = T_freq_subset$Frequency, na.rm = TRUE)
+    Col_name <- paste("L", LocCode, "_", Year, sep = "")
+    T_LAC_list[[Col_name]] <- LAC
+    
+    if (is.nan(Gini)) next
+    
+  } }
+
+temp_T_Gini <- bind_cols(T_Gini_list)
+temp_T_Gini <- temp_T_Gini %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  separate(rowname, into = c("LocCode", "Year"), sep = "_", remove = FALSE) 
+temp_T_Gini$LocCode <- gsub("L", "", temp_T_Gini$LocCode)
+names(temp_T_Gini) <- c("LocYR", "LocCode", "Year", "T_Gini")
+
+
+T_LAC <- bind_cols(T_LAC_list)
+T_LAC <- T_LAC %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  separate(rowname, into = c("LocCode", "Year"), sep = "_", remove = FALSE) 
+T_LAC$LocCode <- gsub("L", "", T_LAC$LocCode)
+names(T_LAC) <- c("LocYR", "LocCode", "Year", "T_LAC")
+
+T_Gini <- merge(temp_T_Gini, CardCounts_ALL, by = c("LocYR"), all = TRUE)
+T_Gini <- T_Gini %>% merge(T_LAC, by = "LocYR", all = TRUE )
+T_Gini <- T_Gini %>% 
+  dplyr::select(-LocCode.x, -Year.x, -LocCode.y, -Year.y) %>% 
+  drop_na(T_Gini) %>% 
+  mutate(Year = as.numeric(Year))
+
+ALL_Gini <- left_join(T_Gini, CPUE_df, by = c("Year", "LocName"))
+
+## Gini & LAC Means
+mean_T_Gini_ALL <- mean(ALL_Gini$T_Gini)
+print(mean_T_Gini_ALL)
+sd(ALL_Gini$T_Gini)
+
+mean_T_LAC_ALL <- mean(ALL_Gini$T_LAC)
+print(mean_T_LAC_ALL)
+sd(ALL_Gini$T_LAC)
+
+Region_Gini_ALL <- ALL_Gini %>% 
+  group_by(Region) %>% 
+  summarise(Mean_T_Gini = mean(T_Gini), SD_T_Gini = sd(T_Gini), Mean_T_LAC = mean(T_LAC), SD_T_LAC = sd(T_LAC), T_CardCount = sum(CardCount)) %>% 
+  ungroup()
+
+CV_Gini_Mean <- Region_Gini_ALL[1,2]
+CV_Gini_Mean <- as.numeric(CV_Gini_Mean)
+NC_Gini_Mean <- Region_Gini_ALL[2,2]
+NC_Gini_Mean <- as.numeric(NC_Gini_Mean)
+
+## Df of mean Gini by Location
+Loc_Mean_Gini_ALL <- ALL_Gini %>%    
+  group_by(LocCode, LocName, Region) %>% 
+  summarise(Mean_T_Gini = mean(T_Gini), SE_T_Gini = sd(T_Gini) / sqrt(n()), SD_T_Gini = sd(T_Gini), Mean_T_LAC = mean(T_LAC), T_CardCount = sum(CardCount)) %>% 
+  ungroup() %>%
+  mutate(LocName = factor(LocName, levels = Loc_Order_Gini)) %>%
+  arrange(LocName)
+
+
+######### SIGNIFICANCE TESTS ###################################################
+
+
+## Gini across LocCodes
+    ## Kruskal-wallis:
+kruskal.test(T_Gini ~ LocName, data = ALL_Gini)
+    ## Dunn's post-hoc:
+temp_dunn_test_loc <-dunnTest(T_Gini ~ LocName, data = ALL_Gini, method = "bonferroni")
+dunn_test_loc <- temp_dunn_test_loc$res
+dunn_test_loc_compare <-cldList(comparison = dunn_test_loc$Comparison, p.value = dunn_test_loc$P.adj, threshold  = 0.05)
+dunn_test_loc_compare <- dunn_test_loc_compare %>%
+  mutate(Group = str_replace(Group, "(.*)(R\\.)", "\\1 R.")) %>% 
+  rename(LocName = Group)
+dunn_test_loc_compare[2, "LocName"] <- "Coastal R.\n (Kla.to Rus.)"
+dunn_test_loc_compare[10, "LocName"] <- "San Lorenzo R."
+
+  ## Adding significance groups to main df
+Loc_Mean_Gini_ALL <- Loc_Mean_Gini_ALL %>% 
+  left_join(dunn_test_loc_compare, by = "LocName") %>%
+  mutate(LocName = factor(LocName, levels = Loc_Order_Gini)) %>%
+  arrange(LocName)
+
+
+## Gini across Regions
+    ## Kruskal-wallis:
+kruskal.test(T_Gini ~ Region, data = ALL_Gini)
+    ## Dunn's post-hoc:
+temp_dunn_test_region <-dunnTest(T_Gini ~ Region, data = ALL_Gini, method = "bonferroni")
+dunn_test_region <- temp_dunn_test_region$res
+dunn_test_region[1,4]
+dunn_test_region_compare <-cldList(comparison = dunn_test_region$Comparison, p.value = dunn_test_region$P.adj, threshold  = 0.05) #sig diff between regions!
+
+## Gini & LAC Correlation
+
+Gini_LAC_lm_ALL <- lm(T_Gini ~ T_LAC, data = ALL_Gini)
+summary(Gini_LAC_lm_ALL )
+
+
+## Anglers catching zero fish 
+No_fish <- SRRC_all %>%
+  group_by(Year) %>%
+  summarise(
+    Total_anglers = n_distinct(`Angler ID`),
+    Zero_T_sum = n_distinct(`Angler ID`[T_sum == 0]),
+    Prop_zero = Zero_T_sum / Total_anglers
+  )
+
+mean(No_fish$Prop_zero) ## Annual avg of anglers catching zero fish
+
+SRRC_all %>% 
+  filter(T_sum == 0) %>%
+  tally()
+
+SRRC_all %>% 
+  tally()
+
+63460/121505 ## % trips reporting zero fish catch
+```
+
+```{r}
+################### HARVEST TOTAL GINI #####################################
+
+## Creating frequency table of total fish, grouped by year & location code
+T_freq_Harvest <- SRRC_filtered_ALL %>% 
+  group_by(Year, LocCode, LocName,HatcheryKept) %>% 
+  tally() %>% 
+  ungroup() %>% 
+  rename(Frequency = n)
+
+## For loop calculating Gini & LAC for each location per year
+Unique_Years_Harvest <- unique(T_freq_Harvest$Year)
+Unique_LocCodes_Harvest <- unique(T_freq_Harvest$LocCode)
+
+T_Gini_list_Harvest <- list()
+T_LAC_list_Harvest <- list()
+
+for (Year in Unique_Years_Harvest) {
+  for (LocCode in Unique_LocCodes_Harvest) {
+    
+    T_freq_subset_Harvest <- T_freq_Harvest[T_freq_Harvest$Year == Year & T_freq_Harvest$LocCode == LocCode, ]
+    
+    Gini_Harvest <- DescTools::Gini(x = T_freq_subset_Harvest$HatcheryKept, weights = T_freq_subset_Harvest$Frequency, unbiased = FALSE)
+    Col_name <- paste("L", LocCode, "_", Year, sep = "")
+    T_Gini_list_Harvest[[Col_name]] <- Gini_Harvest
+    
+    LAC_Harvest <- Lasym(T_freq_subset_Harvest$HatcheryKept, n = T_freq_subset_Harvest$Frequency, na.rm = TRUE)
+    Col_name <- paste("L", LocCode, "_", Year, sep = "")
+    T_LAC_list_Harvest[[Col_name]] <- LAC_Harvest
+    
+    if (is.nan(Gini_Harvest)) next
+    
+  } }
+
+temp_T_Gini_Harvest <- bind_cols(T_Gini_list_Harvest)
+temp_T_Gini_Harvest <- temp_T_Gini_Harvest %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  separate(rowname, into = c("LocCode", "Year"), sep = "_", remove = FALSE) 
+temp_T_Gini_Harvest$LocCode <- gsub("L", "", temp_T_Gini_Harvest$LocCode)
+names(temp_T_Gini_Harvest) <- c("LocYR", "LocCode", "Year", "T_Gini")
+
+
+T_LAC_Harvest <- bind_cols(T_LAC_list_Harvest)
+T_LAC_Harvest <- T_LAC_Harvest %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  separate(rowname, into = c("LocCode", "Year"), sep = "_", remove = FALSE) 
+T_LAC_Harvest$LocCode <- gsub("L", "", T_LAC_Harvest$LocCode)
+names(T_LAC_Harvest) <- c("LocYR", "LocCode", "Year", "T_LAC")
+
+T_Gini_Harvest <- merge(temp_T_Gini_Harvest, CardCounts_ALL, by = c("LocYR"), all = TRUE)
+T_Gini_Harvest <- T_Gini_Harvest %>% merge(T_LAC_Harvest, by = "LocYR", all = TRUE )
+T_Gini_Harvest <- T_Gini_Harvest %>% 
+  dplyr::select(-LocCode.x, -Year.x, -LocCode.y, -Year.y) %>% 
+  drop_na(T_Gini) %>% 
+  mutate(Year = as.numeric(Year))
+  
+
+##############  DATAFRAMES #########################################
+
+CPUE_df <- SRRC_filtered_ALL %>%
+  group_by(Year, LocName) %>%
+  drop_na(CPUE) %>% 
+  filter(!is.infinite(CPUE)) %>% 
+  summarize(mean_CPUE = mean(CPUE)) %>%
+  mutate(Year = as.numeric(Year)) %>% 
+  ungroup()
+
+
+ALL_Gini_Harvest <- left_join(T_Gini_Harvest, CPUE_df, by = c("Year", "LocName"))
+
+ALL_Gini_Harvest <- ALL_Gini_Harvest %>% 
+  mutate(Region = case_when (
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley")) # adding region classification
+
+
+## Gini & LAC Means
+mean_T_Gini_ALL_Harvest <- mean(ALL_Gini_Harvest$T_Gini)
+print(mean_T_Gini_ALL_Harvest)
+sd(ALL_Gini_Harvest$T_Gini)
+
+mean_T_LAC_ALL_Harvest <- mean(ALL_Gini_Harvest$T_LAC)
+print(mean_T_LAC_ALL_Harvest)
+sd(ALL_Gini_Harvest$T_LAC)
+
+Region_Gini_ALL_Harvest <- ALL_Gini_Harvest %>% 
+  group_by(Region) %>% 
+  summarise(Mean_T_Gini = mean(T_Gini), SD_T_Gini = sd(T_Gini), Mean_T_LAC = mean(T_LAC), SD_T_LAC = sd(T_LAC), T_CardCount = sum(CardCount)) %>% 
+  ungroup()
+
+
+## Df of mean Gini by Location
+Loc_Mean_Gini_ALL_Harvest <- ALL_Gini_Harvest %>%    
+  group_by(LocCode, LocName, Region) %>% 
+  summarise(Mean_T_Gini = mean(T_Gini), SE_T_Gini = sd(T_Gini) / sqrt(n()), SD_T_Gini = sd(T_Gini), Mean_T_LAC = mean(T_LAC), T_CardCount = sum(CardCount)) %>% 
+  ungroup() %>%
+  mutate(LocName = factor(LocName, levels = Loc_Order_Gini)) %>%
+  arrange(LocName)
+
+```
+
+## -- All lorenz curves
+```{r}
+## NOTE: Same loop as calculating Gini; removed LAC & added Lorenz curve plots.
+
+Unique_Years <- unique(T_freq$Year)
+Unique_LocCodes <- unique(T_freq$LocCode)
+
+T_Gini_list <- list()
+
+for (Year in Unique_Years) {
+  for (LocCode in Unique_LocCodes) {
+    
+    T_freq_subset <- T_freq[T_freq$Year == Year & T_freq$LocCode == LocCode, ]
+    
+    Gini <- DescTools::Gini(x = T_freq_subset$T_sum, weights = T_freq_subset$Frequency, unbiased = FALSE)
+    Col_name <- paste("L", LocCode, "_", Year, sep = "")
+    T_Gini_list[[Col_name]] <- Gini
+    
+    if (is.nan(Gini)) next
+    
+    LocName <- unique(T_freq_subset$LocName)
+    
+    plot(DescTools::Lc(x = T_freq_subset$T_sum, weights = T_freq_subset$Frequency),
+         main = paste("Location", LocName, "(", LocCode, ")", Year, "Total Fish"), 
+         sub = paste("Gini Coefficient =", Gini), 
+         ylab = "Cumulative % Fish Caught", 
+         xlab = "Cumulative % Anglers")
+  } }
+
+```
+
+
+## -- Fig 2A (Example Gini)
+```{r}
+
+## Teaching Figure data
+
+trinity_2017_subset <- T_freq %>% 
+  filter(Year == 2017, 
+         LocCode == 3)
+
+lc_trinity_2017 <- DescTools::Lc(x = trinity_2017_subset$T_sum, 
+                            weights = trinity_2017_subset$Frequency)
+
+## Example Figure data
+
+american_2017_subset <- T_freq %>% 
+  filter(Year == 2017, 
+         LocCode == 18)
+
+trinity_2017_subset <- T_freq %>% 
+  filter(Year == 2017, 
+         LocCode == 3)
+
+lc_american <- DescTools::Lc(x = american_2017_subset$T_sum, 
+                  weights = american_2017_subset$Frequency)
+
+lc_trinity <- DescTools::Lc(x = trinity_2017_subset$T_sum, 
+                 weights = trinity_2017_subset$Frequency)
+
+
+#####  EXPORTING TOGETHER   #####
+
+jpeg("lorenz_fig2A.jpg", width = 3600, height = 1800, res = 300)
+
+## Shared plot layout
+par(mfrow = c(1, 2),          ## 1 row, 2 columns
+    oma = c(2.4, 1, 1, 0.6),      ## Outer margin
+    mar = c(2, 5, 2, 2))      ## Inner margins
+
+## Teaching figure
+plot(lc_trinity_2017, 
+     main = "",
+     ylab = "Cumulative % Fish Caught", 
+     xlab = "",  
+     cex.lab = 1.3,
+     col = "darkslategray",
+     lwd = 3, 
+     frame.plot = FALSE)
+
+usr <- par("usr")
+segments(x0 = usr[1], y0 = usr[3], x1 = usr[1], y1 = usr[4], lwd = 2)
+segments(x0 = usr[1], y0 = usr[3], x1 = usr[2], y1 = usr[3], lwd = 2)
+segments(x0 = usr[2], y0 = usr[3], x1 = usr[2], y1 = usr[4], lwd = 2)
+
+polygon(x = c(lc_trinity_2017$p, rev(lc_trinity_2017$p)),
+        y = c(lc_trinity_2017$L, rev(lc_trinity_2017$p)),
+        col = adjustcolor("darkslategray4", alpha.f = 0.3),
+        border = NA)
+
+abline(0, 1, lty = 2, lwd = 3, col = "black")
+text(x = 0.5, y = 0.55, labels = "Line of Equality (1:1)", srt = 46, col = "black", cex = 1.2)
+text(x = 0.4, y = 0.25, labels = " Area H", col = "darkslategray", cex =1.2)
+text(x = 0.8, y = 0.25, labels = "Area h", col = "black", cex = 1.2)
+text(x = 0.27, 0.9, labels = "Gini = H / (H + h)", col = "black", font = 2, cex = 1.3)
+
+## Example Figure
+plot(lc_american,
+     main = "",
+     ylab = "", 
+     xlab = "",  
+     col = "goldenrod3", 
+     lwd = 3,
+     frame.plot = FALSE)
+
+usr <- par("usr")
+segments(x0 = usr[1], y0 = usr[3], x1 = usr[1], y1 = usr[4], lwd = 2)
+segments(x0 = usr[1], y0 = usr[3], x1 = usr[2], y1 = usr[3], lwd = 2)
+segments(x0 = usr[2], y0 = usr[3], x1 = usr[2], y1 = usr[4], lwd = 2)
+
+lines(lc_trinity, col = "coral", lwd = 3)
+abline(0, 1, lty = 2, lwd = 3, col = "black")
+
+legend("topleft", 
+       legend = c("American R. (2017),  Gini = 0.90", "Trinity R. (2017),  Gini = 0.72"),
+       col = c("goldenrod3", "coral"),
+       lwd = 3,
+       cex = 1.2,
+       bty = "n")
+
+## Shared x-axis
+mtext("Cumulative % Anglers", side = 1, outer = TRUE, line = 1, cex = 1.4,  adj = 0.53)
+
+dev.off()
+
+
+
+## Note - to export individually, add the following before each plot & end with dev.off: 
+  # png("teachingfigure.png", width = 6, height = 6, units = "in", res = 300)
+  # par(mar = c(5, 5.5, 4, 2)) #fixes cut off axis titles when exporting
+
+```
+
+
+
+## -- Fig 2B (Gini bar chart)
+```{r, fig.width=8, fig.height=8}
+
+Region_colors <- c(
+  "Central Valley" = "darkgoldenrod3", 
+  "North Coast" = "coral3",
+  "Other" = "gray"
+)
+
+## Total gini barcharts by location 
+barchart_T_Gini_ALL <- ggplot(data = Loc_Mean_Gini_ALL, aes(x = LocName, y = Mean_T_Gini, fill = Region)) +
+ geom_bar(stat = "identity") +
+ scale_fill_manual(values = Region_colors) +
+  geom_errorbar( aes(x = LocName, ymin=Mean_T_Gini - SE_T_Gini, ymax=Mean_T_Gini + SE_T_Gini))+
+  labs(y = "Mean Gini")  +
+  #scale_y_continuous(limits = c(0, 1)) + ## Full scale
+  coord_cartesian(ylim = c(0.5, 1)) +
+  #geom_hline(yintercept = mean_T_Gini_ALL, color="darkslategray4", linewidth = 1) +
+#  geom_hline(yintercept = CV_Gini_Mean, color="darkgoldenrod4", linewidth = 1) +
+#  geom_hline(yintercept = NC_Gini_Mean, color="coral4", linewidth = 1) +
+  theme_bw(base_size = 18) + 
+  theme(panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+       axis.text.x = element_text(angle = 45, hjust = 1),
+       axis.title.x = element_blank(),
+       axis.text.y = element_text(size = 18),
+       legend.position = "none") +
+  geom_text(aes(y = Mean_T_Gini + SE_T_Gini + 0.02, label = Letter), vjust = 0, color = "black", size = 5) +
+  annotate("text", x = 3.5, y = 0.95, label = "North Coast", size = 6.3, color = "coral3", fontface = "bold") +
+  annotate("text", x = 10, y = 0.95, label = "Central Valley", size = 6.3, color = "darkgoldenrod3", fontface = "bold") +
+  annotate("text", x = 13, y = 0.95, label = "Other", size = 6.3, color = "gray40", fontface = "bold") 
+barchart_T_Gini_ALL
+
+#ggsave("barchart_T_Gini_ALL.png", width = 14, height = 8)
+
+```
+
+# RESPONSE RATE
+
+```{r}
+
+## Checking normality of annual Ginis
+
+## of all Ginis aggregated (satisfy all 3 tests)
+  ggdensity(ALL_Gini$T_Gini, fill = "grey") ## Histogram
+  ggqqplot(ALL_Gini$T_Gini) ## QQ plot
+  shapiro_test(ALL_Gini, x = T_Gini) ## Shapiro test 
+
+## of Gini by location (satisfy all 3 tests)
+  ALL_Gini %>% ## Histograms
+    ggplot(mapping = aes(x = T_Gini)) +
+    geom_histogram() +
+    facet_wrap(~LocName, scales = 'free_y')
+  
+  ggqqplot(ALL_Gini, "T_Gini") + ## QQ plots
+    facet_wrap(~ LocName, scales = "free")
+
+  ALL_Gini %>% ## Shapiro tests
+    group_by(LocName) %>% 
+    shapiro_test(T_Gini)
+  
+  LeveneTest(T_Gini ~ LocName, data = ALL_Gini) ## Levene test 
+  
+
+## Response rate DF 
+## NOTE: unknown response rate for 2022
+Response_rate_df <- data.frame(Year = 2012:2021, ResponseRate = c(0.43,0.26,0.29,0.32,0.37,0.39,0.36,0.34,0.36,0.34))
+
+Annual_Gini_ALL <- ALL_Gini %>% 
+  filter(Year != 2022) %>%  
+  group_by(Year) %>% 
+  summarise(Mean_Gini_Year = mean(T_Gini, na.rm = TRUE))
+
+Response_rate_df$Mean_Gini_ALL_Year <- Annual_Gini_ALL$Mean_Gini_Year 
+
+## R2 and P-Value
+Response_rate_lm_ALL <- lm(Mean_Gini_ALL_Year ~ ResponseRate, data = Response_rate_df)
+summary(Response_rate_lm_ALL)
+  
+## Basic Scatterplot
+Response_rate_plot_ALL <- Response_rate_df %>% 
+  ggplot(aes(x = ResponseRate, y = Mean_Gini_ALL_Year)) +
+  geom_point() +
+  geom_text(aes(label = Year), vjust = -1, size = 3) + 
+  ylim(NA,0.835) +
+  labs(x = "Response Rate", y = "Annual Mean Gini", title = "All-Seasons: Response Rate vs. Gini", caption = expression(paste(R^2, "= 0.007, P-value = 0.82"))) +
+  theme_minimal(base_size = 14) +
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), 
+       axis.text.x = element_text(angle = 45, hjust = 1,)) 
+Response_rate_plot_ALL
+#ggsave("Response_rate_plot_ALL.jpg", width = 5, height = 5)
+
+```
+
+# MIXED-EFFECT MODEL
+
+## -- Fig 3A (LMM)
+```{r Mixed_Model}
+
+## Mixed-effects model with random intercept & slope + log-transformed card counts
+LMM_T_Gini_ALL <- ALL_Gini %>% 
+  mutate(LogCardCount = log(CardCount))
+
+## Linear mixed effect model
+Mixed_effect_model_ALL <- lmer(T_Gini ~ LogCardCount + (LogCardCount | LocName), data = LMM_T_Gini_ALL)
+temp_residuals_ALL <- resid(Mixed_effect_model_ALL)
+LMM_T_Gini_ALL$Residuals <- temp_residuals_ALL
+
+summary(Mixed_effect_model_ALL)
+
+## Psuedo R-squared for LMM
+LMM_psuedo_r_ALL <- as.data.frame(r.squaredGLMM(Mixed_effect_model_ALL)) 
+print(LMM_psuedo_r_ALL)
+
+## Model predictions for plotting LMM
+LMM_T_Gini_ALL <- LMM_T_Gini_ALL %>% 
+  mutate(fit.m = predict(Mixed_effect_model_ALL, re.form = NA), ## fixed effect
+         fit.c = predict(Mixed_effect_model_ALL, re.form = NULL)) ## mixed effect of the fixed and random effects
+ 
+## Plotting mixed-effect regression - V1 
+LMM_plot1 <- LMM_T_Gini_ALL %>% 
+  ggplot(aes(x = LogCardCount, y = T_Gini, 
+             color = as.factor(Region),
+             group = LocName)) +
+  geom_line(aes(y = fit.c, color = as.factor(Region)), linewidth = 0.8) +
+  geom_line(aes(y = fit.m), color = "darkslategray4", linewidth = 1.4) +
+  geom_point(shape=16, alpha =0.3, size = 3) +
+  scale_color_manual(values = Region_colors) +
+  coord_cartesian(ylim = c(0.7, 0.9)) +
+  labs(x = "Log Annual Sample Size (n)", y = "Gini", color = " ") +
+  theme_classic(base_size = 16) + 
+  theme (legend.position = c(0.12, 0.2))
+LMM_plot1
+#ggsave("LMM_plot1.jpg", width = 12, height = 6)
+
+```
+## -- Fig 3B (Residuals)
+```{r}
+
+residual_plots_ALL <- list()
+LMM_loc_summary_ALL <- list()
+Unique_LocNames_ALL <- unique(ALL_Gini$LocName)
+
+for (i in Unique_LocNames_ALL) {
+  LocCode_subset <- LMM_T_Gini_ALL %>% 
+    filter(LocName == i) %>% 
+    mutate(Year = as.numeric(as.character(Year)))
+  
+  detrended_gini_lm <- lm(Residuals ~ Year, data = LocCode_subset)
+  LMM_loc_summary_ALL[[i]] <- summary(detrended_gini_lm)
+ # print(summary(detrended_gini_lm))
+
+    residual_plot <- ggplot(LocCode_subset, aes(x = Year, y = Residuals)) +
+      geom_point(aes(color = "Residuals"), size = 5) +
+      geom_hline(yintercept = 0, color="gray40", linewidth = 1) +
+      scale_color_manual(values = c("Residuals" = "coral")) +
+      labs(x = "Year", y = "Detrended Gini", title = paste(i)) +
+      theme_minimal(base_size = 14) +
+      scale_x_continuous(breaks = seq(min(2012), max(2021), by = 1))+
+      theme(panel.border = element_blank(), 
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(), 
+      axis.line = element_line(colour = "black"), 
+      axis.text.x = element_text(angle = 45, hjust = 1,),
+      legend.position = "none") 
+  
+    #ggsave(filename = paste0("DetrendedGiniALL_", i, ".jpg"), width = 7, height = 5)
+    
+    residual_plots_ALL[[i]] <- residual_plot
+  
+}
+
+for (i in names(LMM_loc_summary_ALL)) {
+  print(paste("Summary for LocName:", i))
+  print(LMM_loc_summary_ALL[[i]])
+}
+
+
+for (i in seq_along(residual_plots_ALL)) {
+ print(residual_plots_ALL[[i]])
+}
+
+
+########## Facet-wrap plots ###################
+
+## Adding statewide average row 
+temp_LMM_Gini_statewide <- LMM_T_Gini_ALL %>% 
+  group_by(Year) %>% 
+  summarise(Residuals = mean(Residuals, na.rm = TRUE)) %>% 
+  mutate(LocName = "Statewide Avg.",
+         LocCode = as.character(0)) 
+
+LMM_Gini_statewide <- bind_rows(LMM_T_Gini_ALL,temp_LMM_Gini_statewide)
+LMM_Gini_statewide <- LMM_Gini_statewide %>% 
+  mutate(LocName = factor(LocName, levels = Loc_Order_Statewide)) %>%
+  arrange(LocName)
+
+LMM_Gini_statewide <- LMM_Gini_statewide %>%
+  mutate(Region = ifelse(is.na(Region), "Statewide", Region)) %>% 
+  mutate(yintercept = 0)
+
+Region_colors2 <- c(
+  "Central Valley" = "darkgoldenrod3", 
+  "North Coast" = "coral3",
+  "Other" = "gray40", 
+  "Statewide" = "darkslategray4"
+)
+
+residual_plot_facet2 <- ggplot(LMM_Gini_statewide, aes(x = Year, y = Residuals)) +
+  geom_point(aes(color = Region), size = 3, alpha = 0.3) +
+  geom_hline(aes(yintercept = yintercept, color = Region), linewidth = 0.9) +
+  scale_color_manual(values =  Region_colors2) +
+  labs(y = "Detrended Gini")+
+  theme_minimal(base_size = 16) +
+  scale_x_continuous(breaks = seq(min(2010), max(2025), by = 5),
+                     limits =c(2010, 2025))+
+  scale_y_continuous(limits = c(-0.07, 0.07))+
+  facet_wrap(~ LocName, nrow = 2, scales = "fixed", axes = "all", axis.labels = "margins") +
+  theme(panel.border = element_blank(), 
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(), 
+      axis.line = element_line(colour = "black"), 
+      axis.text.x = element_text(angle = 45, hjust = 1,),
+      legend.position = "none", 
+      axis.title.y  = element_text(size = 16),
+      axis.title.x = element_blank(),
+      axis.ticks = element_line(linewidth = 0.3)) 
+residual_plot_facet2
+#ggsave("detrended_gini_facetwrap.jpg", width = 12, height = 6)
+
+## Bonferroni correction 
+Bonferroni_ALL <- 0.05/13
+```
+
+
+
+# FLOW 
+
+## -- Fig 4 (All months)
+```{r FlowVignette}
+
+## Read in flow data
+Flow_csv <- read_csv(here("data/USGS_Flow_Data.csv"))
+
+## Create df with flow data, T_gini (and residuals), and LAC
+T_Gini_Flow <- merge(T_Gini, LMM_T_Gini_ALL, by = c("LocCode", "Year"), all = TRUE)
+T_Gini_Flow <- T_Gini_Flow %>% 
+  dplyr::select(-LocYR.y, -T_Gini.y, -CardCount.x, -CardCount.y, -T_LAC.y, -LogCardCount, -fit.m, -fit.c, -LocName.y) 
+T_Gini_Flow <- merge(T_Gini_Flow, Flow_csv, by = c("LocCode", "Year"), all.x = TRUE)
+T_Gini_Flow <- T_Gini_Flow %>%  
+  drop_na() %>% 
+  dplyr::select(-Name) %>% 
+  rename(LocYR = LocYR.x, T_Gini = T_Gini.x, T_LAC = T_LAC.x, LocName = LocName.x)
+T_Gini_Flow$LogFlow_cfs <- log(T_Gini_Flow$Annual_Discharge_cfs)
+T_Gini_Flow$Annual_Discharge_cms <- (T_Gini_Flow$Annual_Discharge_cfs)*0.3048
+T_Gini_Flow$LogFlow_cms <- log(T_Gini_Flow$Annual_Discharge_cms)
+
+temp_T_Gini_Flow <- T_Gini_Flow %>% 
+  group_by(Year) %>% 
+  summarise(LogFlow_cfs = mean(LogFlow_cfs, na.rm = TRUE),
+            Annual_Discharge_cfs = mean(Annual_Discharge_cfs, na.rm = TRUE),
+            LogFlow_cms = mean(LogFlow_cms, na.rm = TRUE),
+            Annual_Discharge_cms = mean(Annual_Discharge_cms, na.rm = TRUE)) %>% 
+  mutate(LocName = "Statewide Avg.", 
+         LocCode = as.character(0))
+
+temp_T_Gini_Flow2 <- full_join(temp_T_Gini_Flow,temp_LMM_Gini_statewide, by = c("Year", "LocName"))
+
+T_Gini_Flow <- bind_rows(T_Gini_Flow,temp_T_Gini_Flow2)
+T_Gini_Flow <- T_Gini_Flow %>% 
+  mutate(LocName = factor(LocName, levels = Loc_Order_Statewide)) %>%
+  arrange(LocName)
+
+
+
+## Spearman Correlation, LAC commented out
+Unique_LocName_final <- unique(T_Gini_Flow$LocName)
+
+#Spearman_A_G_list <- list()
+#Spearman_A_F_list <- list()
+Spearman_G_F_list <- list()
+
+results_spearman <- data.frame(LocName = character(),
+                      Test = character(),
+                      Estimate = numeric(),
+                      P_Value = numeric(),
+                      stringsAsFactors = FALSE)
+
+
+for (i in Unique_LocName_final) {
+
+  subset_data <- subset(T_Gini_Flow, LocName == i)
+  
+ # Spearman_A_G <- cor.test(subset_data$T_LAC, subset_data$Residuals, method = "spearman")
+ # Spearman_A_F <- cor.test(subset_data$T_LAC, subset_data$LogFlow, method = "spearman")
+  Spearman_G_F <- cor.test(subset_data$Residuals, subset_data$LogFlow_cms, method = "spearman")
+  
+#  Spearman_A_G_list[[i]] <- Spearman_A_G
+#  Spearman_A_F_list[[i]] <- Spearman_A_F
+  Spearman_G_F_list[[i]] <- Spearman_G_F
+  
+
+#  results_spearman <- rbind(results_spearman, data.frame(LocCode = i, Test = "LAC - Gini", Estimate = Spearman_A_G$estimate, P_Value = Spearman_A_G$p.value))
+#  results_spearman <- rbind(results_spearman, data.frame(LocCode = i, Test = "LAC - Flow", Estimate = Spearman_A_F$estimate, P_Value = Spearman_A_F$p.value))
+  results_spearman <- rbind(results_spearman, data.frame(LocName = i, Test = "Gini - Flow", Estimate = Spearman_G_F$estimate, P_Value = Spearman_G_F$p.value))
+}
+
+print(results_spearman)
+
+Bonferri_correction_flow <- 0.05/11
+
+results_spearman$Significant_Bonferri <- results_spearman$P_Value <= Bonferri_correction_flow
+
+results_spearman$label <- paste0("italic(r) == ", round(results_spearman$Estimate, 2))
+
+## Line plots -- facet wrap
+
+T_Gini_Flow <- T_Gini_Flow %>% 
+  mutate(LocName = factor(LocName, levels = Loc_Order_Statewide)) 
+
+results_spearman <- results_spearman %>%
+  mutate(LocName = factor(LocName, levels = Loc_Order_Statewide))
+
+flow_plot <- ggplot(T_Gini_Flow, aes(x = Year)) +
+   geom_line(aes(y = Residuals, color = "Detrended Gini", group = LocName ), linewidth = 0.9) +
+  geom_line(aes(y = LogFlow_cms/100, color = "Log Annual Flow (cms)", group = LocName), linewidth = 0.9) +
+  scale_color_manual(values = c("Log Annual Flow (cms)" = "darkslategray3", "Detrended Gini" = "darkslategray" )) +
+  scale_y_continuous(
+    name = "Detrended Gini",
+    limits = c(-.08, .10),
+    sec.axis = sec_axis(~ . *100, name = "Log Annual Flow (cms)")) +
+  theme_minimal(base_size = 16) +
+  scale_x_continuous(breaks = seq(min(2010), max(2025), by = 5),
+                     limits =c(2010, 2025)) +
+  geom_text(data = results_spearman, aes(x = 2010.5, y = -Inf, label = label),
+  parse = TRUE, inherit.aes = FALSE, hjust = 0, vjust = -0.4, size = 4.5)+
+  facet_wrap(~ LocName, nrow = 2, scales = "fixed", axes = "all", axis.labels = "margins") +
+  theme(panel.border = element_blank(), 
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(), 
+      axis.line = element_line(colour = "black"), 
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.text=element_text(size=14),
+      legend.position = "top", 
+      legend.title = element_blank(),
+      axis.title.y  = element_text(size = 16),
+      axis.title.x = element_blank(),
+      axis.ticks = element_line(linewidth = 0.3))
+flow_plot
+
+#ggsave("flow_plot.jpg", width = 12, height = 6)
+
+```
+## -- Selected months
+```{r}
+## To replicate analysis on monthly timescale, conduct Spearman Correlations and Line Plots using the following dataframe. Replace T_Gini_Flow -> T_Gini_Flow_monthly, and LogFlow_cms -> Selected_avg_cms
+
+## Read in flow data
+Flow_csv_monthly <- read_csv(here("data/USGS_Flow_Monthly.csv"))
+
+## Select months of flow to use 
+Flow_csv_monthly <- Flow_csv_monthly %>%
+  mutate(Selected_avg_cfs = rowMeans(dplyr::select(., January, February, March, October, November, December), na.rm = TRUE))
+
+## Create df with flow data, T_gini (and residuals), and LAC
+T_Gini_Flow_monthly <- merge(T_Gini, LMM_T_Gini_ALL, by = c("LocCode", "Year"), all = TRUE)
+T_Gini_Flow_monthly <- T_Gini_Flow_monthly %>% 
+  dplyr::select(-LocYR.y, -T_Gini.y, -CardCount.x, -CardCount.y, -T_LAC.y, -LogCardCount, -fit.m, -fit.c, -LocName.y) 
+T_Gini_Flow_monthly <- merge(T_Gini_Flow_monthly, Flow_csv_monthly, by = c("LocCode", "Year"), all.x = TRUE)
+T_Gini_Flow_monthly <- T_Gini_Flow_monthly %>%  
+  drop_na() %>% 
+  dplyr::select(-Name) %>% 
+  rename(LocYR = LocYR.x, T_Gini = T_Gini.x, T_LAC = T_LAC.x, LocName = LocName.x)
+T_Gini_Flow_monthly$LogFlow_cfs <- log(T_Gini_Flow_monthly$Selected_avg_cfs)
+T_Gini_Flow_monthly$Selected_avg_cms <- (T_Gini_Flow_monthly$Selected_avg_cfs)*0.3048
+T_Gini_Flow_monthly$LogFlow_cms <- log(T_Gini_Flow_monthly$Selected_avg_cms)
+
+temp_T_Gini_Flow_monthly <- T_Gini_Flow_monthly %>% 
+  group_by(Year) %>% 
+  summarise(LogFlow_cfs = mean(LogFlow_cfs, na.rm = TRUE),
+            Selected_avg_cfs = mean(Selected_avg_cfs, na.rm = TRUE),
+            LogFlow_cms = mean(LogFlow_cms, na.rm = TRUE),
+            Selected_avg_cms = mean(Selected_avg_cms, na.rm = TRUE)) %>% 
+  mutate(LocName = "Statewide Avg.", 
+         LocCode = as.character(0))
+
+temp_T_Gini_Flow2_monthly <- full_join(temp_T_Gini_Flow_monthly,temp_LMM_Gini_statewide, by = c("Year", "LocName"))
+
+T_Gini_Flow_monthly <- bind_rows(T_Gini_Flow_monthly,temp_T_Gini_Flow2_monthly)
+T_Gini_Flow_monthly <- T_Gini_Flow_monthly %>% 
+  mutate(LocName = factor(LocName, levels = Loc_Order_Statewide)) %>%
+  arrange(LocName)
+```
+
+
+# MAP
+## -- Fig 1 (Map)
+```{r Map}
+## Read in lat/long data 
+lat_long <- read_csv(here("data/Loc_Coord2.csv"))
+
+## Combine rows into totals for each location 
+SRRC_map <- SRRC_all %>% 
+  group_by(LocCode, LocName) %>% 
+  summarise(across(c(T_sum, W_sum, H_sum), sum)) %>% 
+  mutate(W_percent = W_sum / T_sum) %>% 
+  mutate(H_percent = H_sum / T_sum) %>% 
+  mutate(Region = case_when (
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley"), 
+    Hatchery = case_when (
+      LocCode %in% c(2,3,5,9,15,16,18,19) ~ "Yes",
+      LocCode %in% c(1,4,6,7,8,10,11,12,13,14,17,20) ~ "No"
+    )) ## Adding region/hatchery classification
+
+## Hatchery presence in non-hatchery basins
+no_hatchery <- SRRC_map %>% 
+  filter(Hatchery == "No",
+         LocCode != 14) 
+
+mean(no_hatchery$H_percent)
+
+
+## Catch dataframe with sums and coordinates 
+SRRC_map <- merge(SRRC_map, lat_long, by = "LocCode")
+
+Region_catch <- SRRC_map %>% 
+  group_by(Region) %>% 
+  summarise(total_catch = sum(T_sum))
+
+## CPUE dataframe with sums and coordinates
+SRRC_map_CPUE <- SRRC_all %>% 
+  drop_na(CPUE) %>% 
+  filter(!is.infinite(CPUE)) %>% 
+  group_by(LocCode, LocName) %>% 
+  summarise(Mean_CPUE = mean(CPUE)) %>% 
+  mutate(Region = case_when (
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley")) ## Adding region classification
+
+SRRC_map_CPUE <- merge(SRRC_map_CPUE, lat_long, by = "LocCode")
+mean(SRRC_map_CPUE$Mean_CPUE)
+sd(SRRC_map_CPUE$Mean_CPUE)
+
+
+## CA map base
+states <- map_data("state")
+ca_df <- states %>%
+  filter(region == "california")
+ca_base <- ggplot(data = ca_df, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_quickmap() + 
+  geom_polygon(color = "black", fill = "white")
+
+## Map by catch
+map_sum_sized <- ca_base +
+  geom_point(data = SRRC_map, 
+             aes(x = Longitude, y = Latitude, size = T_sum, group = 1),
+             colour = "coral", fill = "coral", pch = 21, alpha = I(0.8)) +
+  labs(size="No. Fish (2012-2022)")+
+  theme_void(base_size = 14)
+map_sum_sized
+#ggsave("Map_Catch.jpg")
+
+## Map by CPUE
+map_CPUE <- ca_base +
+  geom_point(data = SRRC_map_CPUE, 
+             aes(x = Longitude, y = Latitude, size = Mean_CPUE, group = 1),
+             colour = "coral", fill = "coral", pch = 21, alpha = I(0.3)) +
+  labs(size= expression(paste("Fish Hr"^-1, "(2012-2022)")))+
+  theme_void(base_size = 14)
+map_CPUE
+
+## Map - both Catch and CPUE
+map_CPUE_Catch <- ca_base +
+  geom_point(data = SRRC_map, 
+             aes(x = Longitude, y = Latitude, size = T_sum, group = 1),
+             colour = "coral", fill = "coral", pch = 21, alpha = I(0.6)) +
+  labs(size="No. Fish") +
+   new_scale("size") +  ## New size scale
+   geom_point(data = SRRC_map_CPUE, 
+             aes(x = Longitude, y = Latitude, size = Mean_CPUE, group = 1),
+             colour = "orangered3", fill = NA, pch = 21, alpha = I(1)) +
+  labs(size= expression(paste("Fish Hr"^-1))) +
+  theme_void(base_size = 14)
+map_CPUE_Catch
+#ggsave("map_CPUE_Catch.jpg")
+
+
+## Pie Chart by LocCode -- CATCH
+catch_df_long <- SRRC_map %>%
+  pivot_longer(cols = c(H_percent, W_percent), names_to = "Origin", values_to = "Origin_sum")
+
+
+piechart_catch <- ggplot(catch_df_long, aes(x = "", y = Origin_sum, fill = Origin)) +
+  geom_bar(width = 1, stat = "identity") +
+  scale_fill_manual(values = c("darkslategrey", "darkslategray3"))+
+  coord_polar(theta = "y") +
+  facet_wrap(~ Name) +
+  labs(x = NULL, y = NULL, fill = "Type") +
+  theme_void(base_size = 14)
+print(piechart_catch)
+
+## Total pie chart
+total_piechart <- data.frame(
+  Category = c("Hatchery", "Wild"),
+  Value = c(sum(SRRC_map$H_sum), sum(SRRC_map$W_sum)))
+
+summary_piechart <- ggplot(total_piechart, aes(x = "", y = Value, fill = Category)) + 
+  scale_fill_manual(values = c("darkslategrey", "darkslategray3"))+
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  labs(title = "Pie Chart of Two Values", fill = "Origin", x = NULL, y = NULL)+
+  theme_void(base_size = 14)
+summary_piechart
+#ggsave("summary_piechart.jpg")
+
+114238/(114238 + 269840)
+
+```
+
+# TABLE DATA
+Note: Table 3 (comparison) & Supp 2 (flow gauges) created outside of R.
+
+## -- Tab 1 (Catch trends)
+```{r}
+
+Loc_Order_longitude_all <- c("1", "4","6", "8", "7", "17", "11", "20", "10", "12", "13", "2", "3", "5", "9", "15", "16", "18", "19", "14")
+## Only use for this table --> arranged hatchery then longitude
+
+Table_CatchTrends_Annual <- SRRC_all %>% 
+  group_by (LocCode, LocName, Year) %>% 
+  summarise(across(c(T_sum, W_sum, H_sum), sum)) %>% 
+  mutate(W_percent = W_sum / T_sum) %>% 
+  mutate(H_percent = H_sum / T_sum) %>% 
+  mutate(Region = case_when (
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley"), 
+    Hatchery = case_when (
+      LocCode %in% c(2,3,5,9,15,16,18,19) ~ "Yes",
+      LocCode %in% c(1,4,6,7,8,10,11,12,13,14,17,20) ~ "No"
+    )) %>%  ## Adding region/hatchery classification
+  dplyr::select(LocCode, Hatchery, LocName, Year, T_sum, W_percent, H_percent) %>% 
+  mutate(LocCode = factor(LocCode, levels = Loc_Order_longitude_all)) %>%
+  arrange(LocCode)
+
+Table_CatchTrends_Range <- Table_CatchTrends_Annual %>%
+  group_by(LocCode, LocName, Hatchery) %>%
+  summarize(
+    Min_H_percent = min(H_percent*100, na.rm = TRUE),
+    Max_H_percent = max(H_percent*100, na.rm = TRUE)) %>% 
+    mutate(Range = paste0(
+      format(round(Min_H_percent, 2), nsmall = 2),
+      " - ",
+      format(round(Max_H_percent, 2), nsmall = 2))) %>%
+  dplyr::select(LocCode, Hatchery, LocName, Range) %>% 
+  mutate(LocCode = factor(LocCode, levels = Loc_Order_longitude_all)) %>%
+  arrange(LocCode)
+
+
+Table_CatchTrends_Mean <- SRRC_all %>% 
+  group_by(LocCode, LocName) %>% 
+  summarise(across(c(T_sum, W_sum, H_sum), sum)) %>% 
+  mutate(W_percent = (W_sum / T_sum)*100) %>% 
+  mutate(H_percent = (H_sum / T_sum)*100) %>% 
+  mutate(Region = case_when (
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley"), 
+    Hatchery = case_when (
+      LocCode %in% c(2,3,5,9,15,16,18,19) ~ "Yes",
+      LocCode %in% c(1,4,6,7,8,10,11,12,13,14,17,20) ~ "No"
+    )) %>% ## Adding region/hatchery classification
+   dplyr::select(LocCode, Hatchery, LocName, T_sum, W_percent, H_percent) %>% 
+  mutate(LocCode = factor(LocCode, levels = Loc_Order_longitude_all)) %>%
+  arrange(LocCode)
+
+Table_CatchTrends <- left_join(Table_CatchTrends_Range,Table_CatchTrends_Mean) %>% 
+   dplyr::select(LocCode, Hatchery, LocName, T_sum, Range, H_percent) %>% 
+  rename(Basin = LocName,
+         TotalFish = T_sum, 
+         Mean = H_percent)
+
+## Final Table         
+#write.csv(Table_CatchTrends, file = "Table_CatchTrends.csv")
+```
+
+
+## -- Tab 2 (Breakpoints)
+```{r}
+ 
+Loc_Order_longitude_all2 <- c("1", "4", "2", "3","5", "6", "8", "7","9", "15", "16", "17", "18", "19","11", "20", "10", "12", "13","14")
+## Use only for this table
+
+Table_BreakPoints <- left_join(CardCounts_ALL, location_breakpoints_ALL) %>% 
+  select(LocCode, LocName, Q1, CardCount, Year) %>% 
+  mutate(LocCode = factor(LocCode, levels = Loc_Order_longitude_all)) %>%
+  arrange(LocCode) %>% 
+  rename(Basin = LocName,
+         BasinThreshold = Q1)
+
+Table_BreakPoints2 <- Table_BreakPoints %>%
+  group_by(LocCode, Basin, BasinThreshold) %>%
+  summarize(
+    Min_CardCount = min(CardCount, na.rm = TRUE),
+    Max_CardCount = max(CardCount, na.rm = TRUE)) %>% 
+    mutate(CardCountRange = paste0(Min_CardCount, " - ", Max_CardCount)) %>%
+  dplyr::select(LocCode, Basin, BasinThreshold, CardCountRange) %>% 
+  mutate(LocCode = factor(LocCode, levels = Loc_Order_longitude_all2)) %>%
+  arrange(LocCode)
+
+## Final Tables  
+#write.csv(Table_BreakPoints, file = "Table_BreakPoints.csv")
+#write.csv(Table_BreakPoints2, file = "Table_BreakPoints2.csv")
+```
+
+## -- Sup 2 (Gini)
+```{r}
+Table_Gini_Range <- ALL_Gini %>%
+  group_by(LocCode, LocName) %>%
+  summarize(
+    Min_Gini = min(T_Gini, na.rm = TRUE),
+    Max_Gini = max(T_Gini, na.rm = TRUE)) %>% 
+     mutate(Range = paste0(
+      format(round(Min_Gini, 2), nsmall = 2),
+      " - ",
+      format(round(Max_Gini, 2), nsmall = 2))) %>%
+  dplyr::select(LocCode, LocName, Range)
+
+Table_Gini <- left_join(Table_Gini_Range, Loc_Mean_Gini_ALL) %>% 
+  dplyr::select(LocCode, Region, LocName, Range, Mean_T_Gini, Mean_T_LAC, T_CardCount) %>% 
+  mutate(LocName = factor(LocName, levels = Loc_Order_longitude)) %>%
+  arrange(LocName) %>% 
+   rename(Basin = LocName, 
+         Mean = Mean_T_Gini,
+         MeanLAC = Mean_T_LAC,
+         n = T_CardCount)
+
+mean(Table_Gini$Mean)
+mean(Table_Gini$MeanLAC)
+sum(Table_Gini$n)
+Region_Gini_ALL
+
+## Final Tables!   
+#write.csv(Table_Gini, file = "Table_Gini.csv")
+```
