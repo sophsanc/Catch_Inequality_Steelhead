@@ -1,6 +1,8 @@
 # Catch_Inequality_Steelhead
 Code for the manuscript: "Quantifying catch inequality in recreational fisheries: a case study with California steelhead (Oncorhynchus mykiss)". S.R. Sanchez, C. Schneider, N.A. Fangue, and R.L. Rypel. 
 
+Corresponding author/code: Sophia R. Sanchez, sosanc@ucdavis.edu
+
 CONTENT DESCRIPTION:
 
 Steelhead_Script_Main.Rmd is the main code file, and requires the following data sets to run. 
