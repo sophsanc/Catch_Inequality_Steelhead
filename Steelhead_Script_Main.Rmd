@@ -25,6 +25,7 @@ library(tidyverse)
 library(dplyr)
 library(stringr) 
 library(ggplot2)
+library(cowplot)
 library(DescTools) # Gini and Lorenz curves
 library(ineq) # LAC
 library(FSA) # Dunn test
@@ -49,73 +50,75 @@ library(datawizard) # mixed effects model standardization
 Note: This chunk requires raw data from SRRC as delivered by CDFW, and cannot be run with provided data sets in repository. It is included to demonstrate the filtration process necessary to produce the cleaned subsequent data set available to users.
 
 ```{r}
-# ## Importing CSVs
-# first_year = 2012; ## Setting the first year
-# last_year = 2022; ## Setting the last year
-# 
-# add_WildKept <- function(x){
-#   x <- mutate(x, WildKept = replicate(nrow(x), 0))
-#   return(x)
-# }
-# 
-# ## Creating meta list of each of the selected years. Each entry is data from a given year.
-# meta=list()
-# for(i in first_year:last_year){
-#   name <- paste("SRRC_", i,sep='')
-#   index <- i-(first_year-1)
-#   meta[[index]]=read_csv(here(paste('data/SRRC_',i,'.csv',sep='')))
-#   ## Adding "WildKept" column (populated with zeros) to years lacking it
-#   meta[[index]] <- add_WildKept(meta[[index]])
-#   assign(name, meta[[index]])
-# }
-# 
-# ## Master DF --> no manipulation
-# SRRC_raw <- do.call(rbind, meta)
-# 
-# ## Adding Basin Names
-# names <- data.frame(
-#   LocCode = 1:20,
-#   LocName = c("Smith R.", "Klamath R.", "Trinity R.", "Coastal St./R. north of Klamath R.", "Mad R.", "Eel R.", "Gualala R.", "Coastal R.\n (Kla.to Rus.)", "Russian R.", "San Lorenzo R.", "Coastal St./R. between Russian and Pajaro R.", "Carmel R.", "Coastal St./R. from Pajaro (included) to Santa Maria R.", "Santa Maria R. to Mexican Border", "Sacramento R.", "Feather R.", "Yuba R.", "American R.", "Mokelumne R.", "San Joaquin R." ))
-# 
-# ## Clean data
-# SRRC_raw_clean <- SRRC_raw %>%
-#   drop_na(WildReleased, WildKept, HatcheryReleased, HatcheryKept, LocCode) %>% ##drop NA fish counts
-#   filter(LocCode <= 20) %>%  #filter for valid LocCodes
-#   dplyr::select(-`Complete Data`, -`Date Of Birth`, -`Physical Zip Code`) %>% ##remove unnec. columns
-#   left_join(names, by = "LocCode") %>% ## adding LocNames
-#   mutate(Season = case_when( ## Season classification
-#     Month %in% c(1, 2, 3) ~ "Winter",
-#     Month %in% c(4, 5, 6, 7, 8) ~ "Spring/Summer",
-#     Month %in% c(9, 10, 11, 12) ~ "Fall"))
-# 
-# 
-# ## Summarize by angler, all (one entry per angler, per location, per year)
-# SRRC_all <- SRRC_raw_clean %>%
-#   group_by(Year, LocName, LocCode, `Angler ID`) %>%
-#   summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
-# 
-# #write_csv(SRRC_all, "SRRC_Dataset.csv")
-# 
-# 
-# #########################################################################
-# 
-# 
-# ## Seasonal Analogs:
-# 
-# #SRRC_Winter <- SRRC_raw_clean %>%
-# #  filter(Season == "Winter") %>%
-# #  group_by(Year, LocName, LocCode, `Angler ID`) %>%
-# #  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
-# 
-# #SRRC_Fall <- SRRC_raw_clean %>%
-# #  filter(Season == "Fall") %>%
-# #  group_by(Year, LocName, LocCode, `Angler ID`) %>%
-# #  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
-# 
-# #SRRC_SpringSummer <- SRRC_raw_clean %>%
-# #  filter(Season == "Spring/Summer") %>%
-# #  group_by(Year, LocName, LocCode, `Angler ID`) %>%
-# #  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+## Importing CSVs
+first_year = 2012; ## Setting the first year
+last_year = 2022; ## Setting the last year
+
+add_WildKept <- function(x){
+  x <- mutate(x, WildKept = replicate(nrow(x), 0))
+  return(x)
+}
+
+## Creating meta list of each of the selected years. Each entry is data from a given year.
+meta=list()
+for(i in first_year:last_year){
+  name <- paste("SRRC_", i,sep='')
+  index <- i-(first_year-1)
+  meta[[index]]=read_csv(here(paste('data/SRRC_',i,'.csv',sep='')))
+  ## Adding "WildKept" column (populated with zeros) to years lacking it
+  meta[[index]] <- add_WildKept(meta[[index]])
+  assign(name, meta[[index]])
+}
+
+## Master DF --> no manipulation
+SRRC_raw <- do.call(rbind, meta)
+
+## Adding Basin Names
+names <- data.frame(
+  LocCode = 1:20,
+  LocName = c("Smith R.", "Klamath R.", "Trinity R.", "Coastal St./R. north of Klamath R.", "Mad R.", "Eel R.", "Gualala R.", "Coastal R.\n (Kla.to Rus.)", "Russian R.", "San Lorenzo R.", "Coastal St./R. between Russian and Pajaro R.", "Carmel R.", "Coastal St./R. from Pajaro (included) to Santa Maria R.", "Santa Maria R. to Mexican Border", "Sacramento R.", "Feather R.", "Yuba R.", "American R.", "Mokelumne R.", "San Joaquin R." ))
+
+## Clean data
+SRRC_raw_clean <- SRRC_raw %>%
+  drop_na(WildReleased, WildKept, HatcheryReleased, HatcheryKept, LocCode) %>% ##drop NA fish counts
+  filter(LocCode <= 20) %>%  #filter for valid LocCodes
+  dplyr::select(-`Complete Data`, -`Date Of Birth`, -`Physical Zip Code`) %>% ##remove unnec. columns
+  left_join(names, by = "LocCode") %>% ## adding LocNames
+  mutate(Season = case_when( ## Season classification
+    Month %in% c(1, 2, 3) ~ "Winter",
+    Month %in% c(4, 5, 6, 7, 8) ~ "Spring/Summer",
+    Month %in% c(9, 10, 11, 12) ~ "Fall"))
+
+## % Entries excluded for incomplete data (see above)
+1 - (nrow(SRRC_raw_clean) / nrow(SRRC_raw))
+
+## Summarize by angler, all (one entry per angler, per location, per year)
+SRRC_all <- SRRC_raw_clean %>%
+  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+
+#write_csv(SRRC_all, "SRRC_Dataset.csv")
+
+
+#########################################################################
+
+
+## Seasonal Analogs:
+
+#SRRC_Winter <- SRRC_raw_clean %>%
+#  filter(Season == "Winter") %>%
+#  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+#  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+
+#SRRC_Fall <- SRRC_raw_clean %>%
+#  filter(Season == "Fall") %>%
+#  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+#  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
+
+#SRRC_SpringSummer <- SRRC_raw_clean %>%
+#  filter(Season == "Spring/Summer") %>%
+#  group_by(Year, LocName, LocCode, `Angler ID`) %>%
+#  summarise(across(c(WildReleased, WildKept, HatcheryReleased, HatcheryKept, HoursFished), sum))
 ```
 
 ## -- Data Frames
@@ -142,6 +145,10 @@ SRRC_all <- SRRC_all %>%
      W_Present = W_sum != 0, ## Presence/absence wild catch 
      H_Present = H_sum != 0 ) %>% ## Presence/absence hatchery catch
   dplyr::select("Year", "LocCode", "LocName", "Region", "Hatchery", "Angler ID", "T_sum", "W_sum", "H_sum", "HoursFished", "CPUE", "CPUE_W", "CPUE_H", "WildKept", "WildReleased", "HatcheryKept", "HatcheryReleased", "W_Present", "H_Present") ## Organize
+
+Num_anglers_annual <- SRRC_all %>% 
+  group_by(Year) %>% 
+  summarise(Unique_anglers = n_distinct(`Angler ID`))
 
 
 ###################### ADDITIONAL DATA FRAMES ################################
@@ -341,7 +348,6 @@ breakpoints2000_ALL_sampled <- breakpoints2000_ALL %>%
   sample_n(500, replace = FALSE) %>%
   ungroup()
 
-
 ## DATA-WIDE BREAKPOINT 
 statewide_breakpoints_ALL <- breakpoints2000_ALL_sampled %>%
   summarize(
@@ -354,6 +360,7 @@ statewide_breakpoints_ALL <- breakpoints2000_ALL_sampled %>%
 statewide_breakpoints_ALL
 
 statewide_bp_ALL <- statewide_breakpoints_ALL$Q1
+
 
 
 ## LOC-SPECIFIC BREAKPOINT 
@@ -402,7 +409,7 @@ BP_approved_ALL <- temp_BP_ALL %>%
   rename(LocCode = Location) %>% 
   filter(Num_Approved_Yrs == 11) 
 
-SRRC_filtered_ALL <- SRRC_all %>%
+SRRC_filtered_ALL <- SRRC_all %>% # DF of SRRC from only approved basins
   inner_join(BP_approved_ALL, by = "LocCode")
 
 ## Bonferroni correction 
@@ -855,16 +862,19 @@ Gini_LAC_lm_ALL <- lm(T_Gini ~ T_LAC, data = ALL_Gini)
 summary(Gini_LAC_lm_ALL )
 
 
-## Anglers catching zero fish 
-No_fish <- SRRC_all %>%
+## Anglers catching zero fish (all basins)
+No_fish<- SRRC_all %>%
+  group_by(Year, `Angler ID`) %>%
+  summarise(
+    Annual_catch = sum(T_sum, na.rm = TRUE)) %>%
+  ungroup() %>% 
   group_by(Year) %>%
   summarise(
-    Total_anglers = n_distinct(`Angler ID`),
-    Zero_T_sum = n_distinct(`Angler ID`[T_sum == 0]),
-    Prop_zero = Zero_T_sum / Total_anglers
-  )
+    Total_anglers = n(),
+    Zero_anglers = sum(Annual_catch == 0),
+    Prop_zero = Zero_anglers / Total_anglers)
 
-mean(No_fish$Prop_zero) ## Annual avg of anglers catching zero fish
+mean(No_fish$Prop_zero) ## Annual avg of anglers catching zero fish (all basins)
 
 SRRC_all %>% 
   filter(T_sum == 0) %>%
@@ -873,7 +883,51 @@ SRRC_all %>%
 SRRC_all %>% 
   tally()
 
-63460/121505 ## % trips reporting zero fish catch
+63460/121505 ## % angler cards reporting zero fish catch (all basins)
+
+# Anglers catching zero fish (filtered basins) --> use this since we are comparing to Gini/LAC, which only accounts for filtered basins
+No_fish_filtered <- SRRC_filtered_ALL %>%
+  group_by(Year, `Angler ID`) %>%
+  summarise(
+    Annual_catch = sum(T_sum, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  group_by(Year) %>%
+  summarise(
+    Total_anglers = n(),
+    Zero_anglers = sum(Annual_catch == 0),
+    Prop_zero = Zero_anglers / Total_anglers)
+
+mean(No_fish_filtered$Prop_zero) ## Annual avg of anglers catching zero fish all year; regardless location (filtered basins)
+
+No_fish_filtered_LocYear <- SRRC_filtered_ALL %>%
+  group_by(Year, LocName, `Angler ID`,Region) %>%
+  summarise(
+    Annual_catch = sum(T_sum, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  group_by(Year, LocName,Region) %>%
+  summarise(
+    Total_anglers = n(),
+    Zero_anglers = sum(Annual_catch == 0),
+    Prop_zero = Zero_anglers / Total_anglers)
+
+No_fish_filtered_Loc <- No_fish_filtered_LocYear %>% 
+  group_by(LocName,Region) %>%
+  summarise(
+  Mean_prop_zero_anglers = mean(Prop_zero))
+
+No_fish_filtered_Loc %>% 
+  group_by(Region) %>% 
+  summarise(Mean_region_zero_anglers = mean(Mean_prop_zero_anglers))
+
+SRRC_filtered_ALL %>% 
+  filter(T_sum == 0) %>%
+  tally()
+
+SRRC_filtered_ALL %>% 
+  tally()
+
+59570/115926 ## % angler cards reporting zero fish catch (filtered basins)
+
 ```
 
 ```{r}
@@ -1014,7 +1068,7 @@ for (Year in Unique_Years) {
 ```
 
 
-## -- Fig 2A (Example Gini)
+## -- Fig 2AB (Example Gini)
 ```{r}
 
 ## Teaching Figure data
@@ -1045,18 +1099,22 @@ lc_trinity <- DescTools::Lc(x = trinity_2017_subset$T_sum,
 
 #####  EXPORTING TOGETHER   #####
 
-jpeg("lorenz_fig2A.jpg", width = 3600, height = 1800, res = 300)
+#jpeg("lorenz_fig2A.jpg", width = 3600, height = 1800, res = 300)
 
 ## Shared plot layout
-par(mfrow = c(1, 2),          ## 1 row, 2 columns
-    oma = c(2.4, 1, 1, 0.6),      ## Outer margin
-    mar = c(2, 5, 2, 2))      ## Inner margins
+# par(mfrow = c(1, 2),          ## 1 row, 2 columns
+#     oma = c(2.4, 1, 1, 0.6),      ## Outer margin
+#     mar = c(2, 5, 2, 2))      ## Inner margins
 
-## Teaching figure
+## Teaching figure 2A
+
+# png("teachingfigure2A.png", width = 6, height = 6, units = "in", res = 300)
+# par(mar = c(5, 5.5, 4, 2)) #fixes cut off axis titles when exporting
+
 plot(lc_trinity_2017, 
      main = "",
      ylab = "Cumulative % Fish Caught", 
-     xlab = "",  
+     xlab = "Cumulative % Anglers",  #leave blank if exporting together
      cex.lab = 1.3,
      col = "darkslategray",
      lwd = 3, 
@@ -1073,16 +1131,22 @@ polygon(x = c(lc_trinity_2017$p, rev(lc_trinity_2017$p)),
         border = NA)
 
 abline(0, 1, lty = 2, lwd = 3, col = "black")
-text(x = 0.5, y = 0.55, labels = "Line of Equality (1:1)", srt = 46, col = "black", cex = 1.2)
+text(x = 0.5, y = 0.55, labels = "Line of Equality (1:1)", srt = 44, col = "black", cex = 1.2)
 text(x = 0.4, y = 0.25, labels = " Area H", col = "darkslategray", cex =1.2)
 text(x = 0.8, y = 0.25, labels = "Area h", col = "black", cex = 1.2)
 text(x = 0.27, 0.9, labels = "Gini = H / (H + h)", col = "black", font = 2, cex = 1.3)
 
-## Example Figure
+#dev.off()  # For single plot export 
+
+## Example Figure 2B
+
+# png("teachingfigure2B.png", width = 6, height = 6, units = "in", res = 300)
+# par(mar = c(5, 5.5, 4, 2)) #fixes cut off axis titles when exporting
 plot(lc_american,
      main = "",
-     ylab = "", 
-     xlab = "",  
+     ylab = "Cumulative % Fish Caught", #leave blank if exporting together  
+     xlab = "Cumulative % Anglers",  #leave blank if exporting together  
+     cex.lab = 1.3, #leave out if exporting together
      col = "goldenrod3", 
      lwd = 3,
      frame.plot = FALSE)
@@ -1092,20 +1156,21 @@ segments(x0 = usr[1], y0 = usr[3], x1 = usr[1], y1 = usr[4], lwd = 2)
 segments(x0 = usr[1], y0 = usr[3], x1 = usr[2], y1 = usr[3], lwd = 2)
 segments(x0 = usr[2], y0 = usr[3], x1 = usr[2], y1 = usr[4], lwd = 2)
 
-lines(lc_trinity, col = "coral", lwd = 3)
+lines(lc_trinity, col = "coral3", lwd = 3)
 abline(0, 1, lty = 2, lwd = 3, col = "black")
 
 legend("topleft", 
        legend = c("American R. (2017),  Gini = 0.90", "Trinity R. (2017),  Gini = 0.72"),
-       col = c("goldenrod3", "coral"),
+       col = c("goldenrod3", "coral3"),
        lwd = 3,
        cex = 1.2,
        bty = "n")
 
-## Shared x-axis
-mtext("Cumulative % Anglers", side = 1, outer = TRUE, line = 1, cex = 1.4,  adj = 0.53)
+#dev.off() #if exporting individually
 
-dev.off()
+## Shared x-axis, if exporting together
+#mtext("Cumulative % Anglers", side = 1, outer = TRUE, line = 1, cex = 1.4,  adj = 0.53)
+#dev.off() if exporting together
 
 
 
@@ -1117,13 +1182,13 @@ dev.off()
 
 
 
-## -- Fig 2B (Gini bar chart)
+## -- Fig 2C (Gini bar chart)
 ```{r, fig.width=8, fig.height=8}
 
 Region_colors <- c(
   "Central Valley" = "darkgoldenrod3", 
   "North Coast" = "coral3",
-  "Other" = "gray"
+  "Other" = "#0A484F"
 )
 
 ## Total gini barcharts by location 
@@ -1149,7 +1214,7 @@ barchart_T_Gini_ALL <- ggplot(data = Loc_Mean_Gini_ALL, aes(x = LocName, y = Mea
   geom_text(aes(y = Mean_T_Gini + SE_T_Gini + 0.02, label = Letter), vjust = 0, color = "black", size = 5) +
   annotate("text", x = 3.5, y = 0.95, label = "North Coast", size = 6.3, color = "coral3", fontface = "bold") +
   annotate("text", x = 10, y = 0.95, label = "Central Valley", size = 6.3, color = "darkgoldenrod3", fontface = "bold") +
-  annotate("text", x = 13, y = 0.95, label = "Other", size = 6.3, color = "gray40", fontface = "bold") 
+  annotate("text", x = 13, y = 0.95, label = "Other", size = 6.3, color = "#0A484F", fontface = "bold") 
 barchart_T_Gini_ALL
 
 #ggsave("barchart_T_Gini_ALL.png", width = 14, height = 8)
@@ -1240,14 +1305,21 @@ LMM_T_Gini_ALL <- LMM_T_Gini_ALL %>%
          fit.c = predict(Mixed_effect_model_ALL, re.form = NULL)) ## mixed effect of the fixed and random effects
  
 ## Plotting mixed-effect regression - V1 
+#0C5860
+Region_colors_LMM <- c(
+  "Central Valley" = "#FFCA68", 
+  "North Coast" = "coral2",
+  "Other" = "#0A484F"
+)
+
 LMM_plot1 <- LMM_T_Gini_ALL %>% 
   ggplot(aes(x = LogCardCount, y = T_Gini, 
              color = as.factor(Region),
              group = LocName)) +
-  geom_line(aes(y = fit.c, color = as.factor(Region)), linewidth = 0.8) +
-  geom_line(aes(y = fit.m), color = "darkslategray4", linewidth = 1.4) +
-  geom_point(shape=16, alpha =0.3, size = 3) +
-  scale_color_manual(values = Region_colors) +
+  geom_line(aes(y = fit.c, color = as.factor(Region)), linewidth = 1) +
+  geom_line(aes(y = fit.m), color = "black", linewidth = 1.9) +
+  geom_point(shape=16, alpha =0.8, size = 3) +
+  scale_color_manual(values = Region_colors_LMM) +
   coord_cartesian(ylim = c(0.7, 0.9)) +
   labs(x = "Log Annual Sample Size (n)", y = "Gini", color = " ") +
   theme_classic(base_size = 16) + 
@@ -1278,7 +1350,7 @@ for (i in Unique_LocNames_ALL) {
       scale_color_manual(values = c("Residuals" = "coral")) +
       labs(x = "Year", y = "Detrended Gini", title = paste(i)) +
       theme_minimal(base_size = 14) +
-      scale_x_continuous(breaks = seq(min(2012), max(2021), by = 1))+
+      scale_x_continuous(breaks = seq(min(2012), max(2021), by = 1))
       theme(panel.border = element_blank(), 
       panel.grid.major = element_blank(),
       panel.grid.minor = element_blank(), 
@@ -1322,22 +1394,26 @@ LMM_Gini_statewide <- LMM_Gini_statewide %>%
   mutate(yintercept = 0)
 
 Region_colors2 <- c(
-  "Central Valley" = "darkgoldenrod3", 
-  "North Coast" = "coral3",
-  "Other" = "gray40", 
-  "Statewide" = "darkslategray4"
+  "Central Valley" = "#FFCA68", 
+  "North Coast" = "coral2",
+  "Other" = "#0A484F", 
+  "Statewide" = "black"
 )
 
+# adding significance star to klamath
+lab_fun <- function(x) { 
+  ifelse(x == "Klamath R.", paste0(x, " \n*"), x) }
+
 residual_plot_facet2 <- ggplot(LMM_Gini_statewide, aes(x = Year, y = Residuals)) +
-  geom_point(aes(color = Region), size = 3, alpha = 0.3) +
-  geom_hline(aes(yintercept = yintercept, color = Region), linewidth = 0.9) +
+  geom_point(aes(color = Region), size = 3, alpha = 0.8) +
+  geom_hline(aes(yintercept = yintercept, color = Region), linewidth = 1) +
   scale_color_manual(values =  Region_colors2) +
   labs(y = "Detrended Gini")+
   theme_minimal(base_size = 16) +
   scale_x_continuous(breaks = seq(min(2010), max(2025), by = 5),
                      limits =c(2010, 2025))+
   scale_y_continuous(limits = c(-0.07, 0.07))+
-  facet_wrap(~ LocName, nrow = 2, scales = "fixed", axes = "all", axis.labels = "margins") +
+  facet_wrap(~ LocName, nrow = 2, scales = "fixed", axes = "all", axis.labels = "margins", labeller = labeller(LocName = lab_fun)) +
   theme(panel.border = element_blank(), 
       panel.grid.major = element_blank(),
       panel.grid.minor = element_blank(), 
@@ -1391,7 +1467,12 @@ temp_T_Gini_Flow2 <- full_join(temp_T_Gini_Flow,temp_LMM_Gini_statewide, by = c(
 T_Gini_Flow <- bind_rows(T_Gini_Flow,temp_T_Gini_Flow2)
 T_Gini_Flow <- T_Gini_Flow %>% 
   mutate(LocName = factor(LocName, levels = Loc_Order_Statewide)) %>%
-  arrange(LocName)
+  arrange(LocName) %>% 
+  mutate(Region = case_when ( ## Region classification
+    LocCode %in% 1:9 ~ "North Coast", 
+    LocCode %in% 10:14 ~ "Other", 
+    LocCode %in% 15:20 ~ "Central Valley"),
+    Region = ifelse(is.na(Region), "Statewide", Region))
 
 
 
@@ -1443,14 +1524,26 @@ T_Gini_Flow <- T_Gini_Flow %>%
 results_spearman <- results_spearman %>%
   mutate(LocName = factor(LocName, levels = Loc_Order_Statewide))
 
+
+scale_linetype_manual(
+  values = c(
+    "Log Annual Flow" = "solid",
+    "Detrended Gini" = "twodash"
+  ),
+  labels = c(
+    "Detrended Gini",
+    expression(Log~Annual~Flow~(m^3/s))
+  )
+)
+
 flow_plot <- ggplot(T_Gini_Flow, aes(x = Year)) +
-   geom_line(aes(y = Residuals, color = "Detrended Gini", group = LocName ), linewidth = 0.9) +
-  geom_line(aes(y = LogFlow_cms/100, color = "Log Annual Flow (cms)", group = LocName), linewidth = 0.9) +
-  scale_color_manual(values = c("Log Annual Flow (cms)" = "darkslategray3", "Detrended Gini" = "darkslategray" )) +
+   geom_line(aes(y = Residuals, linetype = "Detrended Gini", group = LocName), color = "darkslategray",linewidth = 1) +
+  geom_line(aes(y = LogFlow_cms/100, linetype = "Log Annual Flow (m³/s)", group = LocName), color = "darkslategray", linewidth = 1.5) +
+  scale_linetype_manual(values = c("Log Annual Flow (m³/s)" = "solid", "Detrended Gini" = "twodash" )) +
   scale_y_continuous(
     name = "Detrended Gini",
     limits = c(-.08, .10),
-    sec.axis = sec_axis(~ . *100, name = "Log Annual Flow (cms)")) +
+    sec.axis = sec_axis(~ . *100, name = "Log Annual Flow (m³/s)")) +
   theme_minimal(base_size = 16) +
   scale_x_continuous(breaks = seq(min(2010), max(2025), by = 5),
                      limits =c(2010, 2025)) +
@@ -1471,6 +1564,36 @@ flow_plot <- ggplot(T_Gini_Flow, aes(x = Year)) +
 flow_plot
 
 #ggsave("flow_plot.jpg", width = 12, height = 6)
+
+# # With region colors: 
+# flow_plot2 <- ggplot(T_Gini_Flow, aes(x = Year)) +
+#    geom_line(aes(y = Residuals, linetype = "Detrended Gini", group = LocName, color = Region ), linewidth = 1) +
+#   geom_line(aes(y = LogFlow_cms/100, linetype = "Log Annual Flow (m³/s)", group = LocName, color = Region), linewidth = 1.5) +
+#   scale_linetype_manual(values = c("Log Annual Flow (m³/s)" = "solid", "Detrended Gini" = "twodash" )) +
+#    scale_color_manual(values =  Region_colors2) +
+#   scale_y_continuous(
+#     name = "Detrended Gini",
+#     limits = c(-.08, .10),
+#     sec.axis = sec_axis(~ . *100, name = "Log Annual Flow (m³/s)")) +
+#   theme_minimal(base_size = 16) +
+#   scale_x_continuous(breaks = seq(min(2010), max(2025), by = 5),
+#                      limits =c(2010, 2025)) +
+#   geom_text(data = results_spearman, aes(x = 2010.5, y = -Inf, label = label),
+#   parse = TRUE, inherit.aes = FALSE, hjust = 0, vjust = -0.4, size = 4.5)+
+#   facet_wrap(~ LocName, nrow = 2, scales = "fixed", axes = "all", axis.labels = "margins") +
+#   theme(panel.border = element_blank(), 
+#       panel.grid.major = element_blank(),
+#       panel.grid.minor = element_blank(), 
+#       axis.line = element_line(colour = "black"), 
+#       axis.text.x = element_text(angle = 45, hjust = 1),
+#       legend.text=element_text(size=14),
+#       legend.position = "bottom", 
+#       legend.box = "vertical",
+#       legend.title = element_blank(),
+#       axis.title.y  = element_text(size = 16),
+#       axis.title.x = element_blank(),
+#       axis.ticks = element_line(linewidth = 0.3))
+# flow_plot2
 
 ```
 ## -- Selected months
@@ -1524,6 +1647,7 @@ lat_long <- read_csv(here("data/Loc_Coord2.csv"))
 ## Combine rows into totals for each location 
 SRRC_map <- SRRC_all %>% 
   group_by(LocCode, LocName) %>% 
+  filter(!LocCode == 14) %>% 
   summarise(across(c(T_sum, W_sum, H_sum), sum)) %>% 
   mutate(W_percent = W_sum / T_sum) %>% 
   mutate(H_percent = H_sum / T_sum) %>% 
@@ -1536,6 +1660,8 @@ SRRC_map <- SRRC_all %>%
       LocCode %in% c(1,4,6,7,8,10,11,12,13,14,17,20) ~ "No"
     )) ## Adding region/hatchery classification
 
+SRRC_map <- merge(SRRC_map, lat_long, by = "LocCode")
+
 ## Hatchery presence in non-hatchery basins
 no_hatchery <- SRRC_map %>% 
   filter(Hatchery == "No",
@@ -1545,26 +1671,32 @@ mean(no_hatchery$H_percent)
 
 
 ## Catch dataframe with sums and coordinates 
-SRRC_map <- merge(SRRC_map, lat_long, by = "LocCode")
-
 Region_catch <- SRRC_map %>% 
   group_by(Region) %>% 
   summarise(total_catch = sum(T_sum))
 
-## CPUE dataframe with sums and coordinates
-SRRC_map_CPUE <- SRRC_all %>% 
-  drop_na(CPUE) %>% 
-  filter(!is.infinite(CPUE)) %>% 
-  group_by(LocCode, LocName) %>% 
-  summarise(Mean_CPUE = mean(CPUE)) %>% 
-  mutate(Region = case_when (
-    LocCode %in% 1:9 ~ "North Coast", 
-    LocCode %in% 10:14 ~ "Other", 
-    LocCode %in% 15:20 ~ "Central Valley")) ## Adding region classification
-
-SRRC_map_CPUE <- merge(SRRC_map_CPUE, lat_long, by = "LocCode")
-mean(SRRC_map_CPUE$Mean_CPUE)
-sd(SRRC_map_CPUE$Mean_CPUE)
+# ## CPUE dataframe with sums and coordinates
+# 
+# No_CPUE <- SRRC_filtered_ALL %>%  # Num cards lacking CPUE data
+#   filter(is.na(CPUE) | is.infinite(CPUE)) %>% 
+#   nrow()
+# 
+# No_CPUE / nrow(SRRC_filtered_ALL) # Percentage cards lacking CPUE data
+# 
+# 
+# SRRC_map_CPUE <- SRRC_all %>% 
+#   drop_na(CPUE) %>% 
+#   filter(!is.infinite(CPUE)) %>% 
+#   group_by(LocCode, LocName) %>% 
+#   summarise(Mean_CPUE = mean(CPUE)) %>% 
+#   mutate(Region = case_when (
+#     LocCode %in% 1:9 ~ "North Coast", 
+#     LocCode %in% 10:14 ~ "Other", 
+#     LocCode %in% 15:20 ~ "Central Valley")) ## Adding region classification
+# 
+# SRRC_map_CPUE <- merge(SRRC_map_CPUE, lat_long, by = "LocCode")
+# mean(SRRC_map_CPUE$Mean_CPUE)
+# sd(SRRC_map_CPUE$Mean_CPUE)
 
 
 ## CA map base
@@ -1577,37 +1709,44 @@ ca_base <- ggplot(data = ca_df, mapping = aes(x = long, y = lat, group = group))
 
 ## Map by catch
 map_sum_sized <- ca_base +
-  geom_point(data = SRRC_map, 
+  geom_point(data = SRRC_map,
              aes(x = Longitude, y = Latitude, size = T_sum, group = 1),
-             colour = "coral", fill = "coral", pch = 21, alpha = I(0.8)) +
-  labs(size="No. Fish (2012-2022)")+
+             colour = "coral",fill = "coral",pch = 21, alpha = I(0.8)) +
+  scale_size_area(
+    name = "No. Fish (2012–2022)",
+    max_size = 11,
+    breaks = c(1000, 5000, 20000, 50000, 100000),
+    labels = scales::comma) +
   theme_void(base_size = 14)
+
 map_sum_sized
-#ggsave("Map_Catch.jpg")
 
-## Map by CPUE
-map_CPUE <- ca_base +
-  geom_point(data = SRRC_map_CPUE, 
-             aes(x = Longitude, y = Latitude, size = Mean_CPUE, group = 1),
-             colour = "coral", fill = "coral", pch = 21, alpha = I(0.3)) +
-  labs(size= expression(paste("Fish Hr"^-1, "(2012-2022)")))+
-  theme_void(base_size = 14)
-map_CPUE
+ggsave("Map_Catch.jpg")
 
-## Map - both Catch and CPUE
-map_CPUE_Catch <- ca_base +
-  geom_point(data = SRRC_map, 
-             aes(x = Longitude, y = Latitude, size = T_sum, group = 1),
-             colour = "coral", fill = "coral", pch = 21, alpha = I(0.6)) +
-  labs(size="No. Fish") +
-   new_scale("size") +  ## New size scale
-   geom_point(data = SRRC_map_CPUE, 
-             aes(x = Longitude, y = Latitude, size = Mean_CPUE, group = 1),
-             colour = "orangered3", fill = NA, pch = 21, alpha = I(1)) +
-  labs(size= expression(paste("Fish Hr"^-1))) +
-  theme_void(base_size = 14)
-map_CPUE_Catch
-#ggsave("map_CPUE_Catch.jpg")
+
+# ## Map by CPUE
+# map_CPUE <- ca_base +
+#   geom_point(data = SRRC_map_CPUE, 
+#              aes(x = Longitude, y = Latitude, size = Mean_CPUE, group = 1),
+#              colour = "coral", fill = "coral", pch = 21, alpha = I(0.3)) +
+#   labs(size= expression(paste("Fish Hr"^-1, "(2012-2022)")))+
+#   theme_void(base_size = 14)
+# map_CPUE
+# 
+# ## Map - both Catch and CPUE
+# map_CPUE_Catch <- ca_base +
+#   geom_point(data = SRRC_map, 
+#              aes(x = Longitude, y = Latitude, size = T_sum, group = 1),
+#              colour = "coral", fill = "coral", pch = 21, alpha = I(0.6)) +
+#   labs(size="No. Fish") +
+#    new_scale("size") +  ## New size scale
+#    geom_point(data = SRRC_map_CPUE, 
+#              aes(x = Longitude, y = Latitude, size = Mean_CPUE, group = 1),
+#              colour = "orangered3", fill = NA, pch = 21, alpha = I(1)) +
+#   labs(size= expression(paste("Fish Hr"^-1))) +
+#   theme_void(base_size = 14)
+# map_CPUE_Catch
+# #ggsave("map_CPUE_Catch.jpg")
 
 
 ## Pie Chart by LocCode -- CATCH
